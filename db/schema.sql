@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS vendas (
     cliente          TEXT,
     comissao_sistema REAL,
     arquivo_origem   TEXT    NOT NULL,
-    importado_em     TEXT    NOT NULL,   -- ISO 8601 timestamp da ingestão
-    UNIQUE (data_hora, profissional_id, cliente, item, valor)  -- dedup RN-31
+    importado_em     TEXT    NOT NULL    -- ISO 8601 timestamp da ingestão
+    -- dedup de reimportação: checar arquivo_origem em ingestao.py
 );
 
 CREATE TABLE IF NOT EXISTS categorias_produto (
