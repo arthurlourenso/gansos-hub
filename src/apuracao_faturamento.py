@@ -7,8 +7,32 @@ import argparse
 import os
 import sqlite3
 import sys
+from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
+
+# Vigência retroativa cobre todo o período jan–jul/2026; revisão formal 2026-08-05 (D2)
+_VIGENCIA_INICIO = "2026-01-01"
+
+# RN-12: manicures
+_PARAMS_MANICURES = [
+    ("bronze_meta",  "6000"),
+    ("bronze_premio", "150"),
+    ("prata_meta",   "8000"),
+    ("prata_premio",  "300"),
+    ("ouro_meta",   "10000"),
+    ("ouro_premio",   "500"),
+]
+
+# RN-13: assistentes
+_PARAMS_ASSISTENTES = [
+    ("bronze_meta",  "2500"),
+    ("bronze_premio", "100"),
+    ("prata_meta",   "3500"),
+    ("prata_premio",  "200"),
+    ("ouro_meta",    "5000"),
+    ("ouro_premio",   "350"),
+]
 
 MANICURES = [
     "Hilda Araújo Parga",
@@ -46,6 +70,25 @@ _POLITICA_FUNCAO = {
 # Seed
 # ---------------------------------------------------------------------------
 
+def seed_parametros(con: sqlite3.Connection) -> None:
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for politica, params in [("gratificacao_manicures", _PARAMS_MANICURES),
+                              ("gratificacao_assistentes", _PARAMS_ASSISTENTES)]:
+        for chave, valor in params:
+            existe = con.execute(
+                "SELECT 1 FROM parametros WHERE politica=? AND chave=? AND vigencia_inicio=?",
+                (politica, chave, _VIGENCIA_INICIO),
+            ).fetchone()
+            if not existe:
+                con.execute(
+                    """INSERT INTO parametros
+                       (politica, chave, valor, vigencia_inicio, vigencia_fim, alterado_por, alterado_em)
+                       VALUES (?, ?, ?, ?, NULL, 'sistema', ?)""",
+                    (politica, chave, valor, _VIGENCIA_INICIO, agora),
+                )
+    con.commit()
+
+
 def seed_funcoes(con: sqlite3.Connection) -> None:
     for nome in MANICURES:
         con.execute(
@@ -69,16 +112,51 @@ def seed_funcoes(con: sqlite3.Connection) -> None:
 # Apuração
 # ---------------------------------------------------------------------------
 
+def _get_params_fat(politica: str, mes: str, con: sqlite3.Connection) -> dict | None:
+    """Parâmetros de gratificação vigentes no mês para a política. None se ausentes."""
+    nome_politica = f"gratificacao_{politica}"
+    mes_inicio = mes + "-01"
+    rows = con.execute(
+        """SELECT chave, valor FROM parametros
+           WHERE politica = ?
+             AND vigencia_inicio <= ?
+             AND (vigencia_fim IS NULL OR vigencia_fim > ?)
+           ORDER BY vigencia_inicio DESC""",
+        (nome_politica, mes_inicio, mes_inicio),
+    ).fetchall()
+    if not rows:
+        return None
+    params: dict[str, str] = {}
+    for chave, valor in rows:
+        params.setdefault(chave, valor)
+    return params
+
+
+def _nivel_gratificacao(fat: float, params: dict) -> tuple[str | None, float]:
+    niveis = [
+        ("Ouro",   float(params["ouro_meta"]),   float(params["ouro_premio"])),
+        ("Prata",  float(params["prata_meta"]),  float(params["prata_premio"])),
+        ("Bronze", float(params["bronze_meta"]), float(params["bronze_premio"])),
+    ]
+    for nome, meta, premio in niveis:
+        if fat >= meta:
+            return nome, premio
+    return None, 0.0
+
+
 def apurar_faturamento(mes: str, politica: str, con: sqlite3.Connection) -> list[dict]:
     """
     Retorna faturamento de cada profissional da política no mês informado.
     politica: 'manicures' ou 'assistentes'
     mes: 'YYYY-MM'
-    Aplica RN-13: exclui assistentes desligadas cujo desligamento seja <= mes.
+    Aplica RN-12/13: nível e gratificação se parâmetros existirem.
+    Aplica RN-13: exclui assistentes desligadas cujo desligamento seja >= mes.
     """
     funcao = _POLITICA_FUNCAO.get(politica)
     if not funcao:
         raise ValueError(f"Política inválida: {politica!r}. Use 'manicures' ou 'assistentes'.")
+
+    params = _get_params_fat(politica, mes, con)
 
     rows = con.execute(
         """SELECT p.nome_sistema, ROUND(SUM(v.valor), 2) as fat
@@ -97,9 +175,11 @@ def apurar_faturamento(mes: str, politica: str, con: sqlite3.Connection) -> list
         deslig = DESLIGAMENTOS.get(nome)
         if deslig and mes >= deslig:
             continue
-        resultado.append({"nome": nome, "faturamento": fat or 0.0})
+        fat = fat or 0.0
+        nivel, grat = _nivel_gratificacao(fat, params) if params else (None, 0.0)
+        resultado.append({"nome": nome, "faturamento": fat, "nivel": nivel, "gratificacao": grat})
 
-    # Incluir profissionais com funcao correta mas sem movimento no mês (fat=0)
+    # Profissionais com funcao correta mas sem movimento no mês
     nomes_com_fat = {r["nome"] for r in resultado}
     todos = con.execute(
         "SELECT nome_sistema FROM profissionais WHERE funcao=? ORDER BY nome_sistema",
@@ -111,7 +191,7 @@ def apurar_faturamento(mes: str, politica: str, con: sqlite3.Connection) -> list
         deslig = DESLIGAMENTOS.get(nome)
         if deslig and mes >= deslig:
             continue
-        resultado.append({"nome": nome, "faturamento": 0.0})
+        resultado.append({"nome": nome, "faturamento": 0.0, "nivel": None, "gratificacao": 0.0})
 
     return resultado
 
