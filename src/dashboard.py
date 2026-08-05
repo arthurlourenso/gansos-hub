@@ -193,6 +193,75 @@ def _tab_barbeiros(con, mes: str):
 
 
 # ---------------------------------------------------------------------------
+# Helpers de publicação (RN-21)
+# ---------------------------------------------------------------------------
+
+def _apuracao_publicada(con, mes: str, politica: str) -> dict | None:
+    """Retorna o payload publicado se existir, None caso contrário."""
+    import json
+    row = con.execute(
+        "SELECT payload_json, publicada_em FROM apuracoes WHERE mes=? AND politica=?",
+        (mes, politica),
+    ).fetchone()
+    if row:
+        return {"payload": json.loads(row["payload_json"]), "publicada_em": row["publicada_em"]}
+    return None
+
+
+def _publicar(con, mes: str, politica: str, linhas: list[dict]) -> None:
+    import json
+    from datetime import datetime
+    payload = json.dumps(linhas, ensure_ascii=False)
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    con.execute(
+        "INSERT INTO apuracoes (mes, politica, payload_json, publicada_em) VALUES (?,?,?,?)",
+        (mes, politica, payload, agora),
+    )
+    con.commit()
+
+
+def _bloco_apuracao(con, mes: str, politica: str, label: str, linhas: list[dict],
+                    col_extra: list[str], rename: dict) -> float:
+    """Renderiza bloco de apuração com botão publicar / badge publicado."""
+    pub = _apuracao_publicada(con, mes, politica)
+
+    if pub:
+        st.success(f"✅ Publicada em {pub['publicada_em']} — exibindo snapshot imutável.")
+        linhas_exib = pub["payload"]
+    else:
+        linhas_exib = linhas
+
+    df = pd.DataFrame(linhas_exib)
+    if df.empty:
+        st.info(f"Nenhum(a) {label.lower()} com movimento neste mês.")
+        return 0.0
+
+    if "nivel" in df.columns:
+        df["nivel"] = df["nivel"].apply(_nivel_badge)
+    for col in ["faturamento", "gratificacao", "receita"]:
+        if col in df.columns:
+            df[col] = df[col].map(_fmt_brl)
+    if "ticket_medio" in df.columns:
+        df["ticket_medio"] = df["ticket_medio"].map(lambda v: f"R$ {v:.2f}")
+    if "elegivel" in df.columns:
+        df = df[df["elegivel"].astype(str).isin(["True", "true", True])]
+
+    cols_show = [c for c in col_extra if c in df.columns]
+    st.dataframe(df[cols_show].rename(columns=rename), width="stretch", hide_index=True)
+
+    grat = sum(r.get("gratificacao", 0) for r in linhas_exib)
+    st.caption(f"Subtotal {label.lower()}: {_fmt_brl(grat)}")
+
+    if not pub:
+        if st.button(f"Publicar apuração — {label} {mes}", key=f"pub_{politica}_{mes}"):
+            _publicar(con, mes, politica, linhas)
+            st.success("Apuração publicada! Recarregue para ver o badge.")
+            st.rerun()
+
+    return grat
+
+
+# ---------------------------------------------------------------------------
 # Aba 3 — Apuração
 # ---------------------------------------------------------------------------
 
@@ -204,98 +273,175 @@ def _tab_apuracao(con, mes: str):
 
     total_grat = 0.0
 
-    # Barbeiros
     st.markdown("#### Barbeiros")
     try:
         barb = apurar_barbeiros(mes, con)
-        if barb:
-            df_b = pd.DataFrame(barb)
-            df_b = df_b[df_b["elegivel"]]
-            if not df_b.empty:
-                df_b["nivel"] = df_b["nivel"].apply(_nivel_badge)
-                df_b["gratificacao"] = df_b["gratificacao"].map(_fmt_brl)
-                st.dataframe(
-                    df_b[["nome", "atendimentos", "ticket_medio", "nivel", "gratificacao"]].rename(columns={
-                        "nome": "Barbeiro", "atendimentos": "Atend.",
-                        "ticket_medio": "TM (R$)", "nivel": "Nível", "gratificacao": "Gratificação",
-                    }),
-                    width="stretch", hide_index=True,
-                )
-                grat_barb = sum(r["gratificacao"] for r in barb)
-                total_grat += grat_barb
-                st.caption(f"Subtotal barbeiros: {_fmt_brl(grat_barb)}")
-            else:
-                st.info("Nenhum barbeiro elegível neste mês.")
-        else:
-            st.info("Nenhum barbeiro com serviços neste mês.")
     except ValueError as e:
         st.warning(str(e))
+        barb = []
 
-    # Manicures
+    total_grat += _bloco_apuracao(
+        con, mes, "barbeiros", "Barbeiros", barb,
+        col_extra=["nome", "atendimentos", "ticket_medio", "nivel", "gratificacao"],
+        rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM (R$)",
+                "nivel": "Nível", "gratificacao": "Gratificação"},
+    )
+
     st.markdown("#### Manicures")
     manic = apurar_faturamento(mes, "manicures", con)
-    if manic:
-        df_m = pd.DataFrame(manic)
-        df_m["nivel"] = df_m["nivel"].apply(_nivel_badge)
-        df_m["faturamento"] = df_m["faturamento"].map(_fmt_brl)
-        df_m["gratificacao"] = df_m["gratificacao"].map(_fmt_brl)
-        st.dataframe(
-            df_m[["nome", "faturamento", "nivel", "gratificacao"]].rename(columns={
-                "nome": "Manicure", "faturamento": "Faturamento",
-                "nivel": "Nível", "gratificacao": "Gratificação",
-            }),
-            width="stretch", hide_index=True,
-        )
-        grat_m = sum(r["gratificacao"] for r in manic)
-        total_grat += grat_m
-        st.caption(f"Subtotal manicures: {_fmt_brl(grat_m)}")
+    total_grat += _bloco_apuracao(
+        con, mes, "manicures", "Manicures", manic,
+        col_extra=["nome", "faturamento", "nivel", "gratificacao"],
+        rename={"nome": "Manicure", "faturamento": "Faturamento",
+                "nivel": "Nível", "gratificacao": "Gratificação"},
+    )
 
-    # Assistentes
     st.markdown("#### Assistentes")
     assist = apurar_faturamento(mes, "assistentes", con)
-    if assist:
-        df_a = pd.DataFrame(assist)
-        df_a["nivel"] = df_a["nivel"].apply(_nivel_badge)
-        df_a["faturamento"] = df_a["faturamento"].map(_fmt_brl)
-        df_a["gratificacao"] = df_a["gratificacao"].map(_fmt_brl)
-        st.dataframe(
-            df_a[["nome", "faturamento", "nivel", "gratificacao"]].rename(columns={
-                "nome": "Assistente", "faturamento": "Faturamento",
-                "nivel": "Nível", "gratificacao": "Gratificação",
-            }),
-            width="stretch", hide_index=True,
-        )
-        grat_a = sum(r["gratificacao"] for r in assist)
-        total_grat += grat_a
-        st.caption(f"Subtotal assistentes: {_fmt_brl(grat_a)}")
+    total_grat += _bloco_apuracao(
+        con, mes, "assistentes", "Assistentes", assist,
+        col_extra=["nome", "faturamento", "nivel", "gratificacao"],
+        rename={"nome": "Assistente", "faturamento": "Faturamento",
+                "nivel": "Nível", "gratificacao": "Gratificação"},
+    )
 
     st.divider()
     st.metric("💰 Custo total de gratificações", _fmt_brl(total_grat))
-    st.info("Publicação de apuração disponível no próximo ciclo (T7).")
 
 
 # ---------------------------------------------------------------------------
-# Aba 4 — Parâmetros
+# Aba 4 — Parâmetros (edição com vigência — RN-20)
 # ---------------------------------------------------------------------------
+
+_POLITICAS_CAMPOS = {
+    "gratificacao_barbeiros": {
+        "label": "Barbeiros",
+        "campos": [
+            ("bronze_meta",         "Bronze — Meta TM (R$)"),
+            ("bronze_premio",       "Bronze — Prêmio (R$)"),
+            ("prata_meta",          "Prata — Meta TM (R$)"),
+            ("prata_premio",        "Prata — Prêmio (R$)"),
+            ("ouro_meta",           "Ouro — Meta TM (R$)"),
+            ("ouro_premio",         "Ouro — Prêmio (R$)"),
+            ("minimo_atendimentos", "Mínimo de atendimentos"),
+        ],
+    },
+    "gratificacao_manicures": {
+        "label": "Manicures",
+        "campos": [
+            ("bronze_meta",   "Bronze — Meta fat. (R$)"),
+            ("bronze_premio", "Bronze — Prêmio (R$)"),
+            ("prata_meta",    "Prata — Meta fat. (R$)"),
+            ("prata_premio",  "Prata — Prêmio (R$)"),
+            ("ouro_meta",     "Ouro — Meta fat. (R$)"),
+            ("ouro_premio",   "Ouro — Prêmio (R$)"),
+        ],
+    },
+    "gratificacao_assistentes": {
+        "label": "Assistentes",
+        "campos": [
+            ("bronze_meta",   "Bronze — Meta fat. (R$)"),
+            ("bronze_premio", "Bronze — Prêmio (R$)"),
+            ("prata_meta",    "Prata — Meta fat. (R$)"),
+            ("prata_premio",  "Prata — Prêmio (R$)"),
+            ("ouro_meta",     "Ouro — Meta fat. (R$)"),
+            ("ouro_premio",   "Ouro — Prêmio (R$)"),
+        ],
+    },
+}
+
+
+def _params_vigentes(con, politica: str, mes_inicio: str) -> dict[str, str]:
+    rows = con.execute(
+        """SELECT chave, valor FROM parametros
+           WHERE politica=?
+             AND vigencia_inicio <= ?
+             AND (vigencia_fim IS NULL OR vigencia_fim > ?)
+           ORDER BY vigencia_inicio DESC""",
+        (politica, mes_inicio, mes_inicio),
+    ).fetchall()
+    result: dict[str, str] = {}
+    for r in rows:
+        result.setdefault(r["chave"], r["valor"])
+    return result
+
 
 def _tab_parametros(con):
-    st.subheader("Parâmetros vigentes")
-    st.info("Edição com vigência disponível no próximo ciclo (T7).")
+    from datetime import datetime, date
 
-    rows = con.execute(
-        """SELECT politica, chave, valor, vigencia_inicio, vigencia_fim, alterado_por, alterado_em
-           FROM parametros
-           ORDER BY politica, vigencia_inicio DESC, chave"""
-    ).fetchall()
+    st.subheader("Parâmetros de política")
+    st.caption(
+        "Cada alteração cria uma nova vigência — os meses já publicados continuam "
+        "usando os parâmetros da época (RN-20/21)."
+    )
 
-    if not rows:
-        st.warning("Nenhum parâmetro cadastrado.")
-        return
+    hoje = date.today().strftime("%Y-%m-%d")
 
-    df = pd.DataFrame([dict(r) for r in rows])
-    df["vigencia_fim"] = df["vigencia_fim"].fillna("aberto")
-    df.columns = ["Política", "Chave", "Valor", "Vigência Início", "Vigência Fim", "Alterado Por", "Alterado Em"]
-    st.dataframe(df, width="stretch", hide_index=True)
+    for politica, meta in _POLITICAS_CAMPOS.items():
+        with st.expander(f"**{meta['label']}** — {politica}", expanded=False):
+            # Valores vigentes hoje
+            atual = _params_vigentes(con, politica, hoje)
+
+            st.markdown("**Valores vigentes hoje:**")
+            cols = st.columns(len(meta["campos"]))
+            for i, (chave, label) in enumerate(meta["campos"]):
+                cols[i].metric(label, atual.get(chave, "—"))
+
+            st.markdown("---")
+            st.markdown("**Nova vigência:**")
+
+            with st.form(key=f"form_{politica}"):
+                vig_inicio = st.date_input(
+                    "Vigência a partir de",
+                    value=date.today(),
+                    key=f"vig_{politica}",
+                )
+                alterado_por = st.text_input("Alterado por", value="Arthur", key=f"autor_{politica}")
+
+                novos: dict[str, str] = {}
+                col_forms = st.columns(min(3, len(meta["campos"])))
+                for i, (chave, label) in enumerate(meta["campos"]):
+                    val_atual = atual.get(chave, "0")
+                    novos[chave] = col_forms[i % 3].text_input(
+                        label, value=val_atual, key=f"{politica}_{chave}"
+                    )
+
+                salvar = st.form_submit_button("💾 Salvar nova vigência")
+
+            if salvar:
+                vig_str = vig_inicio.strftime("%Y-%m-%d")
+                agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Fecha vigência anterior (seta vigencia_fim = nova vigencia_inicio)
+                con.execute(
+                    """UPDATE parametros SET vigencia_fim=?
+                       WHERE politica=? AND vigencia_fim IS NULL""",
+                    (vig_str, politica),
+                )
+                # Insere novos valores
+                for chave, valor in novos.items():
+                    con.execute(
+                        """INSERT INTO parametros
+                           (politica, chave, valor, vigencia_inicio, vigencia_fim, alterado_por, alterado_em)
+                           VALUES (?,?,?,?,NULL,?,?)""",
+                        (politica, chave, valor, vig_str, alterado_por, agora),
+                    )
+                con.commit()
+                st.success(f"Nova vigência salva a partir de {vig_str}.")
+                st.rerun()
+
+            # Histórico de vigências
+            hist = con.execute(
+                """SELECT vigencia_inicio, vigencia_fim, chave, valor, alterado_por, alterado_em
+                   FROM parametros WHERE politica=?
+                   ORDER BY vigencia_inicio DESC, chave""",
+                (politica,),
+            ).fetchall()
+            if hist:
+                with st.expander("Histórico de vigências"):
+                    df_h = pd.DataFrame([dict(r) for r in hist])
+                    df_h["vigencia_fim"] = df_h["vigencia_fim"].fillna("aberto")
+                    st.dataframe(df_h, width="stretch", hide_index=True)
 
 
 # ---------------------------------------------------------------------------
