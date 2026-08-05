@@ -35,22 +35,27 @@
     }
   },
   "H2": {
-    "desc": "Ticket médio barbeiros jun+jul/2026",
-    "status": "pendente_T4",
+    "desc": "Ticket médio barbeiros por mês — jun+jul/2026",
     "tolerancia": 0.05,
-    "ticket_medio": {
-      "Mateus Lima": 153.77,
-      "William Silva Melo": 121.14,
-      "Davi Silva Martins": 112.14,
-      "Caique Campos Ferreira": 102.68,
-      "Getúlio S. N. Junior": 127.65
+    "por_mes": {
+      "2026-06": {
+        "William Silva Melo":               {"atendimentos": 213, "ticket_medio": 116.22, "elegivel": true,  "nivel": null},
+        "Davi Silva Martins":               {"atendimentos": 146, "ticket_medio": 110.68, "elegivel": true,  "nivel": null},
+        "Caique Campos Ferreira":           {"atendimentos": 104, "ticket_medio": 102.45, "elegivel": true,  "nivel": null},
+        "Mateus  Lima":                     {"atendimentos":  65, "ticket_medio": 169.00, "elegivel": true,  "nivel": "Ouro"},
+        "Getúlio Silva Do Nascimento Junior":{"atendimentos": 69, "ticket_medio": 119.20, "elegivel": true,  "nivel": null},
+        "Thiago Siqueira":                  {"atendimentos":  20, "ticket_medio": 126.00, "elegivel": false, "nivel": null}
+      },
+      "2026-07": {
+        "William Silva Melo":               {"atendimentos": 225, "ticket_medio": 125.91, "elegivel": true,  "nivel": "Bronze"},
+        "Davi Silva Martins":               {"atendimentos": 149, "ticket_medio": 113.72, "elegivel": true,  "nivel": null},
+        "Caique Campos Ferreira":           {"atendimentos": 112, "ticket_medio": 103.66, "elegivel": true,  "nivel": null},
+        "Mateus  Lima":                     {"atendimentos":  82, "ticket_medio": 139.15, "elegivel": true,  "nivel": "Prata"},
+        "Getúlio Silva Do Nascimento Junior":{"atendimentos": 44, "ticket_medio": 140.91, "elegivel": false, "nivel": null},
+        "Thiago Siqueira":                  {"atendimentos":  28, "ticket_medio": 112.50, "elegivel": false, "nivel": null}
+      }
     },
-    "atendimentos_jun_jul": {
-      "William Silva Melo": 426,
-      "Davi Silva Martins": 292,
-      "Caique Campos Ferreira": 207
-    },
-    "inelegivel_exemplo": "Thiago Siqueira"
+    "inelegivel_exemplos": ["Thiago Siqueira", "Getúlio Silva Do Nascimento Junior"]
   },
   "H3": {
     "desc": "Comissão produtos jan–jul/2026",
