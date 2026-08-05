@@ -1,0 +1,86 @@
+{
+  "H1": {
+    "desc": "Volume de produtos — 7 arquivos mensais",
+    "total_linhas": 787,
+    "total_valor": 24833.0,
+    "por_mes": {
+      "2026-01": {
+        "linhas": 76,
+        "valor": 2174.0
+      },
+      "2026-02": {
+        "linhas": 101,
+        "valor": 3547.0
+      },
+      "2026-03": {
+        "linhas": 115,
+        "valor": 3284.0
+      },
+      "2026-04": {
+        "linhas": 107,
+        "valor": 2968.0
+      },
+      "2026-05": {
+        "linhas": 127,
+        "valor": 3933.0
+      },
+      "2026-06": {
+        "linhas": 113,
+        "valor": 2597.0
+      },
+      "2026-07": {
+        "linhas": 148,
+        "valor": 6330.0
+      }
+    }
+  },
+  "H2": {
+    "desc": "Ticket médio barbeiros jun+jul/2026",
+    "status": "pendente_T4",
+    "tolerancia": 0.05,
+    "ticket_medio": {
+      "Mateus Lima": 153.77,
+      "William Silva Melo": 121.14,
+      "Davi Silva Martins": 112.14,
+      "Caique Campos Ferreira": 102.68,
+      "Getúlio S. N. Junior": 127.65
+    },
+    "atendimentos_jun_jul": {
+      "William Silva Melo": 426,
+      "Davi Silva Martins": 292,
+      "Caique Campos Ferreira": 207
+    },
+    "inelegivel_exemplo": "Thiago Siqueira"
+  },
+  "H3": {
+    "desc": "Comissão produtos jan–jul/2026",
+    "status": "pendente_T5",
+    "maior_vendedora": "Thamires Ferreira",
+    "receita_thamires_7m": 15167.0,
+    "sr_nunes_comissao_sistema": 0.0,
+    "custo_mensal_min": 150.0,
+    "custo_mensal_max": 600.0
+  },
+  "H4": {
+    "desc": "Integridade contínua",
+    "dedup_arquivo_inseridas": 0
+  },
+  "H5": {
+    "desc": "Faturamento mensal manicures/assistentes jan–jun/2026",
+    "status": "pendente_T5b",
+    "tolerancia": 5.0,
+    "manicures_media_mensal": {
+      "Hilda": 10458.0,
+      "Esmeralda": 9164.0,
+      "Isaura": 7957.0,
+      "Rayssa": 6479.0,
+      "Safira": 4858.0
+    },
+    "assistentes_media_mensal": {
+      "Maria Aparecida": 3316.0,
+      "Suzan": 2924.0,
+      "Ana Mayra": 518.0,
+      "Raynara": 57.0
+    }
+  }
+}
