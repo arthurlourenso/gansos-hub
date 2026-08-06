@@ -3,13 +3,11 @@ src/dashboard.py — Dashboard Gansos Hub.
 Uso: streamlit run src/dashboard.py
 """
 import os
-import sqlite3
 
 import pandas as pd
 import streamlit as st
 
-ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")
-DB_PATH = os.path.join(ROOT_DIR, "db", "gansos.db")
+import src.db as db
 
 st.set_page_config(
     page_title="Gansos Hub",
@@ -24,9 +22,7 @@ st.set_page_config(
 
 @st.cache_resource
 def _conectar():
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    return con
+    return db.conectar()
 
 
 def _con():
@@ -35,7 +31,7 @@ def _con():
 
 def _meses_disponiveis(con) -> list[str]:
     rows = con.execute(
-        "SELECT DISTINCT strftime('%Y-%m', data_hora) as mes FROM vendas ORDER BY mes DESC"
+        f"SELECT DISTINCT {db.mes_expr('data_hora')} as mes FROM vendas ORDER BY mes DESC"
     ).fetchall()
     return [r[0] for r in rows]
 
@@ -57,11 +53,11 @@ def _tab_vendas(con, mes: str):
     st.subheader(f"Receita — {mes}")
 
     rows = con.execute(
-        """SELECT tipo,
+        f"""SELECT tipo,
                   ROUND(SUM(valor), 2) as total,
                   COUNT(*) as qtd
            FROM vendas
-           WHERE strftime('%Y-%m', data_hora) = ?
+           WHERE {db.mes_expr('data_hora')} = ?
            GROUP BY tipo""",
         (mes,),
     ).fetchall()
@@ -78,7 +74,7 @@ def _tab_vendas(con, mes: str):
     # Comparativo mensal
     st.markdown("#### Receita mensal — todos os meses")
     hist = con.execute(
-        """SELECT strftime('%Y-%m', data_hora) as mes,
+        f"""SELECT {db.mes_expr('data_hora')} as mes,
                   tipo,
                   ROUND(SUM(valor), 2) as total
            FROM vendas
@@ -100,7 +96,7 @@ def _tab_vendas(con, mes: str):
                   ROUND(SUM(v.valor), 2) as total
            FROM vendas v
            JOIN profissionais p ON p.id = v.profissional_id
-           WHERE strftime('%Y-%m', v.data_hora) = ?
+           WHERE {db.mes_expr('v.data_hora')} = ?
            GROUP BY p.nome_sistema, v.tipo
            ORDER BY total DESC""",
         (mes,),
@@ -176,7 +172,7 @@ def _tab_barbeiros(con, mes: str):
     # Histórico
     st.markdown("#### Evolução histórica — ticket médio")
     meses_hist = con.execute(
-        """SELECT DISTINCT strftime('%Y-%m', data_hora) as mes FROM vendas
+        f"""SELECT DISTINCT {db.mes_expr('data_hora')} as mes FROM vendas
            WHERE tipo='Serviço' ORDER BY mes""",
     ).fetchall()
     hist_data = []
@@ -449,8 +445,10 @@ def _tab_parametros(con):
 # ---------------------------------------------------------------------------
 
 def main():
-    if not os.path.exists(DB_PATH):
-        st.error(f"Banco não encontrado: {DB_PATH}\n\nRode: `python init_db.py` e depois importe os arquivos.")
+    if db.dialect() == "sqlite" and not os.path.exists(
+        os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
+    ):
+        st.error("Banco não encontrado. Rode: `python init_db.py` e depois importe os arquivos.")
         return
 
     con = _con()

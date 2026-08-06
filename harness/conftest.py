@@ -1,11 +1,13 @@
 import json
 import os
-import sqlite3
+import sys
 
 import pytest
 
 HARNESS_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(HARNESS_DIR)
+sys.path.insert(0, ROOT_DIR)
+
 DB_PATH = os.path.join(ROOT_DIR, "db", "gansos.db")
 GOLDEN_PATH = os.path.join(HARNESS_DIR, "golden_numbers.json")
 
@@ -13,7 +15,8 @@ GOLDEN_PATH = os.path.join(HARNESS_DIR, "golden_numbers.json")
 @pytest.fixture(scope="session")
 def con():
     assert os.path.exists(DB_PATH), f"Banco não encontrado: {DB_PATH}. Rode init_db.py + ingestao.py primeiro."
-    c = sqlite3.connect(DB_PATH)
+    import src.db as db
+    c = db.conectar()
     yield c
     c.close()
 

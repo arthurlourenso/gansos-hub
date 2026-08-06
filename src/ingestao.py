@@ -5,12 +5,11 @@ Uso: python src/ingestao.py <arquivo.xlsx>
 import argparse
 import io
 import os
-import sqlite3
 import sys
 import zipfile
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
+import src.db as db
 
 # Minimal styles.xml: openpyxl rejects files with fills malformados
 _STYLES_MINIMAL = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -97,7 +96,7 @@ def _detectar_layout(cabecalho: list[str]) -> str:
     )
 
 
-def _get_ou_criar_profissional(con: sqlite3.Connection, nome: str) -> int | None:
+def _get_ou_criar_profissional(con, nome: str) -> int | None:
     if not nome:
         return None
     nome = nome.strip()
@@ -112,7 +111,7 @@ def _get_ou_criar_profissional(con: sqlite3.Connection, nome: str) -> int | None
     return cur.lastrowid
 
 
-def importar(path: str, con: sqlite3.Connection) -> dict:
+def importar(path: str, con) -> dict:
     arquivo_origem = os.path.basename(path)
     importado_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -196,12 +195,7 @@ def main() -> None:
         print(f"Arquivo não encontrado: {path}", file=sys.stderr)
         sys.exit(1)
 
-    if not os.path.exists(DB_PATH):
-        print(f"Banco não encontrado: {DB_PATH}\nRode init_db.py primeiro.", file=sys.stderr)
-        sys.exit(1)
-
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute("PRAGMA journal_mode=WAL")
+    with db.conectar() as con:
         resultado = importar(path, con)
 
     r = resultado

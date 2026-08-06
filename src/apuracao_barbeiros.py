@@ -4,9 +4,10 @@ Uso: python src/apuracao_barbeiros.py <YYYY-MM>
 """
 import argparse
 import os
-import sqlite3
 import sys
 from datetime import datetime
+
+import src.db as db
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
 
@@ -43,7 +44,7 @@ BARBEIROS = [
 ]
 
 
-def seed_parametros(con: sqlite3.Connection) -> None:
+def seed_parametros(con) -> None:
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for chave, valor in PARAMETROS_BARBEIROS:
         existe = con.execute(
@@ -60,7 +61,7 @@ def seed_parametros(con: sqlite3.Connection) -> None:
     con.commit()
 
 
-def seed_funcoes(con: sqlite3.Connection) -> None:
+def seed_funcoes(con) -> None:
     for nome in BARBEIROS:
         con.execute(
             "UPDATE profissionais SET funcao='barbeiro' WHERE nome_sistema=? AND funcao='pendente'",
@@ -73,7 +74,7 @@ def seed_funcoes(con: sqlite3.Connection) -> None:
 # Apuração
 # ---------------------------------------------------------------------------
 
-def _get_params(mes: str, con: sqlite3.Connection) -> dict:
+def _get_params(mes: str, con) -> dict:
     """Retorna parâmetros vigentes no mês (mais recente antes ou no mês)."""
     mes_inicio = mes + "-01"
     rows = con.execute(
@@ -96,7 +97,7 @@ def _get_params(mes: str, con: sqlite3.Connection) -> dict:
     return params
 
 
-def apurar_barbeiros(mes: str, con: sqlite3.Connection) -> list[dict]:
+def apurar_barbeiros(mes: str, con) -> list[dict]:
     """
     Apura gratificação de barbeiros para o mês informado (RN-10).
     mes: 'YYYY-MM'
@@ -113,10 +114,10 @@ def apurar_barbeiros(mes: str, con: sqlite3.Connection) -> list[dict]:
 
     # Pendentes com vendas de serviço no mês → aviso
     pendentes = con.execute(
-        """SELECT DISTINCT p.nome_sistema
+        f"""SELECT DISTINCT p.nome_sistema
            FROM vendas v JOIN profissionais p ON p.id = v.profissional_id
            WHERE p.funcao = 'pendente' AND v.tipo = 'Serviço'
-             AND strftime('%Y-%m', v.data_hora) = ?""",
+             AND {db.mes_expr('v.data_hora')} = ?""",
         (mes,),
     ).fetchall()
     if pendentes:
@@ -125,14 +126,14 @@ def apurar_barbeiros(mes: str, con: sqlite3.Connection) -> list[dict]:
               file=sys.stderr)
 
     rows = con.execute(
-        """SELECT p.nome_sistema,
-                  COUNT(DISTINCT date(v.data_hora) || '|' || v.cliente) AS atend,
+        f"""SELECT p.nome_sistema,
+                  COUNT(DISTINCT {db.date_expr('v.data_hora')} || '|' || v.cliente) AS atend,
                   SUM(v.valor) AS receita
            FROM vendas v
            JOIN profissionais p ON p.id = v.profissional_id
            WHERE p.funcao = 'barbeiro'
              AND v.tipo = 'Serviço'
-             AND strftime('%Y-%m', v.data_hora) = ?
+             AND {db.mes_expr('v.data_hora')} = ?
              AND v.cliente IS NOT NULL AND v.cliente != ''
            GROUP BY p.nome_sistema
            ORDER BY p.nome_sistema""",
@@ -189,7 +190,7 @@ def main() -> None:
         print(f"Banco não encontrado: {DB_PATH}", file=sys.stderr)
         sys.exit(1)
 
-    with sqlite3.connect(DB_PATH) as con:
+    with db.conectar() as con:
         if args.seed:
             seed_parametros(con)
             seed_funcoes(con)

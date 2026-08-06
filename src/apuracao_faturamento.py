@@ -5,9 +5,10 @@ Uso: python src/apuracao_faturamento.py <YYYY-MM> <manicures|assistentes>
 """
 import argparse
 import os
-import sqlite3
 import sys
 from datetime import datetime
+
+import src.db as db
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
 
@@ -70,7 +71,7 @@ _POLITICA_FUNCAO = {
 # Seed
 # ---------------------------------------------------------------------------
 
-def seed_parametros(con: sqlite3.Connection) -> None:
+def seed_parametros(con) -> None:
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for politica, params in [("gratificacao_manicures", _PARAMS_MANICURES),
                               ("gratificacao_assistentes", _PARAMS_ASSISTENTES)]:
@@ -89,7 +90,7 @@ def seed_parametros(con: sqlite3.Connection) -> None:
     con.commit()
 
 
-def seed_funcoes(con: sqlite3.Connection) -> None:
+def seed_funcoes(con) -> None:
     for nome in MANICURES:
         con.execute(
             "UPDATE profissionais SET funcao='manicure' WHERE nome_sistema=? AND funcao='pendente'",
@@ -112,7 +113,7 @@ def seed_funcoes(con: sqlite3.Connection) -> None:
 # Apuração
 # ---------------------------------------------------------------------------
 
-def _get_params_fat(politica: str, mes: str, con: sqlite3.Connection) -> dict | None:
+def _get_params_fat(politica: str, mes: str, con) -> dict | None:
     """Parâmetros de gratificação vigentes no mês para a política. None se ausentes."""
     nome_politica = f"gratificacao_{politica}"
     mes_inicio = mes + "-01"
@@ -144,7 +145,7 @@ def _nivel_gratificacao(fat: float, params: dict) -> tuple[str | None, float]:
     return None, 0.0
 
 
-def apurar_faturamento(mes: str, politica: str, con: sqlite3.Connection) -> list[dict]:
+def apurar_faturamento(mes: str, politica: str, con) -> list[dict]:
     """
     Retorna faturamento de cada profissional da política no mês informado.
     politica: 'manicures' ou 'assistentes'
@@ -159,12 +160,12 @@ def apurar_faturamento(mes: str, politica: str, con: sqlite3.Connection) -> list
     params = _get_params_fat(politica, mes, con)
 
     rows = con.execute(
-        """SELECT p.nome_sistema, ROUND(SUM(v.valor), 2) as fat
+        f"""SELECT p.nome_sistema, ROUND(SUM(v.valor), 2) as fat
            FROM vendas v
            JOIN profissionais p ON p.id = v.profissional_id
            WHERE p.funcao = ?
              AND v.tipo = 'Serviço'
-             AND strftime('%Y-%m', v.data_hora) = ?
+             AND {db.mes_expr('v.data_hora')} = ?
            GROUP BY p.nome_sistema
            ORDER BY fat DESC""",
         (funcao, mes),
@@ -219,7 +220,7 @@ def main() -> None:
         print(f"Banco não encontrado: {DB_PATH}", file=sys.stderr)
         sys.exit(1)
 
-    with sqlite3.connect(DB_PATH) as con:
+    with db.conectar() as con:
         if args.seed:
             seed_funcoes(con)
             print("Seed de funções executado.")
