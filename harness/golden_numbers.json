@@ -1,8 +1,8 @@
 {
   "H1": {
-    "desc": "Volume de produtos — 7 arquivos mensais",
-    "total_linhas": 787,
-    "total_valor": 24833.0,
+    "desc": "Volume de produtos — 8 arquivos mensais (jan-ago/2026 parcial)",
+    "total_linhas": 867,
+    "total_valor": 28527.0,
     "por_mes": {
       "2026-01": {
         "linhas": 76,
@@ -31,6 +31,10 @@
       "2026-07": {
         "linhas": 148,
         "valor": 6330.0
+      },
+      "2026-08": {
+        "linhas": 80,
+        "valor": 3694.0
       }
     }
   },

@@ -30,11 +30,12 @@ CREATE TABLE IF NOT EXISTS categorias_produto (
 
 CREATE TABLE IF NOT EXISTS parametros (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    politica        TEXT    NOT NULL,  -- gratificacao_barbeiros | comissao_produtos | gratificacao_manicures | gratificacao_assistentes
+    politica        TEXT    NOT NULL,  -- gratificacao_barbeiros | gratificacao_manicures | gratificacao_assistentes | gratificacao_recepcao_caixa
     chave           TEXT    NOT NULL,
     valor           TEXT    NOT NULL,  -- armazenado como texto; converter no código
     vigencia_inicio TEXT    NOT NULL,  -- YYYY-MM-DD
     vigencia_fim    TEXT,              -- NULL = em aberto
+    profissional    TEXT,              -- NULL = aplica a todos da política; preenchido para metas individualizadas
     alterado_por    TEXT    NOT NULL DEFAULT 'sistema',
     alterado_em     TEXT    NOT NULL
 );

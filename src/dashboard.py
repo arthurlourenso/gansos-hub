@@ -265,7 +265,7 @@ def _tab_apuracao(con, mes: str):
     st.subheader(f"Apuração do mês — {mes}")
 
     from src.apuracao_barbeiros import apurar_barbeiros
-    from src.apuracao_faturamento import apurar_faturamento
+    from src.apuracao_faturamento import apurar_faturamento, apurar_recepcao_caixa
 
     total_grat = 0.0
 
@@ -298,6 +298,15 @@ def _tab_apuracao(con, mes: str):
         con, mes, "assistentes", "Assistentes", assist,
         col_extra=["nome", "faturamento", "nivel", "gratificacao"],
         rename={"nome": "Assistente", "faturamento": "Faturamento",
+                "nivel": "Nível", "gratificacao": "Gratificação"},
+    )
+
+    st.markdown("#### Recepção / Caixa")
+    recep = apurar_recepcao_caixa(mes, con)
+    total_grat += _bloco_apuracao(
+        con, mes, "recepcao_caixa", "Recepção/Caixa", recep,
+        col_extra=["nome", "faturamento", "nivel", "gratificacao"],
+        rename={"nome": "Profissional", "faturamento": "Venda Produtos",
                 "nivel": "Nível", "gratificacao": "Gratificação"},
     )
 
@@ -344,6 +353,17 @@ _POLITICAS_CAMPOS = {
             ("ouro_premio",   "Ouro — Prêmio (R$)"),
         ],
     },
+    "gratificacao_recepcao_caixa": {
+        "label": "Recepção / Caixa (produtos)",
+        "campos": [
+            ("bronze_meta",   "Bronze — Meta produtos (R$)"),
+            ("bronze_premio", "Bronze — Prêmio (R$)"),
+            ("prata_meta",    "Prata — Meta produtos (R$)"),
+            ("prata_premio",  "Prata — Prêmio (R$)"),
+            ("ouro_meta",     "Ouro — Meta produtos (R$)"),
+            ("ouro_premio",   "Ouro — Prêmio (R$)"),
+        ],
+    },
 }
 
 
@@ -351,6 +371,7 @@ def _params_vigentes(con, politica: str, mes_inicio: str) -> dict[str, str]:
     rows = con.execute(
         """SELECT chave, valor FROM parametros
            WHERE politica=?
+             AND profissional IS NULL
              AND vigencia_inicio <= ?
              AND (vigencia_fim IS NULL OR vigencia_fim > ?)
            ORDER BY vigencia_inicio DESC""",
@@ -408,10 +429,10 @@ def _tab_parametros(con):
                 vig_str = vig_inicio.strftime("%Y-%m-%d")
                 agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # Fecha vigência anterior (seta vigencia_fim = nova vigencia_inicio)
+                # Fecha vigência anterior (apenas parâmetros gerais, não por profissional)
                 con.execute(
                     """UPDATE parametros SET vigencia_fim=?
-                       WHERE politica=? AND vigencia_fim IS NULL""",
+                       WHERE politica=? AND vigencia_fim IS NULL AND profissional IS NULL""",
                     (vig_str, politica),
                 )
                 # Insere novos valores
@@ -429,7 +450,7 @@ def _tab_parametros(con):
             # Histórico de vigências
             hist = con.execute(
                 """SELECT vigencia_inicio, vigencia_fim, chave, valor, alterado_por, alterado_em
-                   FROM parametros WHERE politica=?
+                   FROM parametros WHERE politica=? AND profissional IS NULL
                    ORDER BY vigencia_inicio DESC, chave""",
                 (politica,),
             ).fetchall()

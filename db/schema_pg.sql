@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS parametros (
     valor           TEXT    NOT NULL,
     vigencia_inicio TEXT    NOT NULL,
     vigencia_fim    TEXT,
+    profissional    TEXT,
     alterado_por    TEXT    NOT NULL DEFAULT 'sistema',
     alterado_em     TEXT    NOT NULL
 );
