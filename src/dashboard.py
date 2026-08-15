@@ -91,7 +91,7 @@ def _tab_vendas(con, mes: str):
     # Top profissionais no mês
     st.markdown("#### Receita por profissional no mês")
     prof_rows = con.execute(
-        """SELECT p.nome_sistema as profissional,
+        f"""SELECT p.nome_sistema as profissional,
                   v.tipo,
                   ROUND(SUM(v.valor), 2) as total
            FROM vendas v
