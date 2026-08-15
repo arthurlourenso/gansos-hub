@@ -303,10 +303,12 @@ def _tab_apuracao(con, mes: str):
 
     st.markdown("#### Recepção / Caixa")
     recep = apurar_recepcao_caixa(mes, con)
+    total_setor_recep = recep[0]["total_setor"] if recep else 0.0
+    st.caption(f"Meta coletiva de produtos — total do setor: {_fmt_brl(total_setor_recep)}")
     total_grat += _bloco_apuracao(
         con, mes, "recepcao_caixa", "Recepção/Caixa", recep,
         col_extra=["nome", "faturamento", "nivel", "gratificacao"],
-        rename={"nome": "Profissional", "faturamento": "Venda Produtos",
+        rename={"nome": "Profissional", "faturamento": "Venda Individual",
                 "nivel": "Nível", "gratificacao": "Gratificação"},
     )
 

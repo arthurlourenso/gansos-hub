@@ -273,10 +273,26 @@ def apurar_faturamento(mes: str, politica: str, con) -> list[dict]:
 
 def apurar_recepcao_caixa(mes: str, con) -> list[dict]:
     """
-    Retorna faturamento de produtos de cada profissional de recepção/caixa no mês (RN-14).
+    Apura recepção/caixa (RN-14): a meta é coletiva (total de produtos do setor),
+    mas o prêmio é individual — cada pessoa ativa recebe se o setor bater a meta.
+    Retorna vendas individuais + nível/prêmio baseados no total do setor.
     """
     params = _get_params_fat("recepcao_caixa", mes, con)
 
+    # Total do setor para determinar o nível coletivo
+    total_row = con.execute(
+        f"""SELECT ROUND(SUM(v.valor), 2) as fat
+           FROM vendas v
+           JOIN profissionais p ON p.id = v.profissional_id
+           WHERE p.funcao = 'recepcao_caixa'
+             AND v.tipo = 'Produto'
+             AND {db.mes_expr('v.data_hora')} = ?""",
+        (mes,),
+    ).fetchone()
+    total_setor = total_row["fat"] or 0.0
+    nivel, grat_individual = _nivel_gratificacao(total_setor, params) if params else (None, 0.0)
+
+    # Vendas individuais (para exibição)
     rows = con.execute(
         f"""SELECT p.nome_sistema, ROUND(SUM(v.valor), 2) as fat
            FROM vendas v
@@ -284,27 +300,25 @@ def apurar_recepcao_caixa(mes: str, con) -> list[dict]:
            WHERE p.funcao = 'recepcao_caixa'
              AND v.tipo = 'Produto'
              AND {db.mes_expr('v.data_hora')} = ?
-           GROUP BY p.nome_sistema
-           ORDER BY fat DESC""",
+           GROUP BY p.nome_sistema""",
         (mes,),
     ).fetchall()
-
-    resultado = []
-    nomes_com_fat: set[str] = set()
-    for nome, fat in rows:
-        fat = fat or 0.0
-        nomes_com_fat.add(nome)
-        nivel, grat = _nivel_gratificacao(fat, params) if params else (None, 0.0)
-        resultado.append({"nome": nome, "faturamento": fat, "nivel": nivel, "gratificacao": grat})
+    fat_por_nome = {r["nome_sistema"]: (r["fat"] or 0.0) for r in rows}
 
     todos = con.execute(
         "SELECT nome_sistema FROM profissionais WHERE funcao='recepcao_caixa' AND ativo=1 ORDER BY nome_sistema"
     ).fetchall()
-    for (nome,) in todos:
-        if nome not in nomes_com_fat:
-            resultado.append({"nome": nome, "faturamento": 0.0, "nivel": None, "gratificacao": 0.0})
 
-    return resultado
+    return [
+        {
+            "nome": nome,
+            "faturamento": fat_por_nome.get(nome, 0.0),
+            "total_setor": total_setor,
+            "nivel": nivel,
+            "gratificacao": grat_individual,
+        }
+        for (nome,) in todos
+    ]
 
 
 def _imprimir(mes: str, politica: str, linhas: list[dict]) -> None:
