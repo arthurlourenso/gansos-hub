@@ -4,6 +4,7 @@ Uso: streamlit run src/dashboard.py
 """
 import os
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -11,7 +12,6 @@ import src.db as db
 
 st.set_page_config(
     page_title="Gansos Hub",
-    page_icon="✂️",
     layout="wide",
 )
 
@@ -19,6 +19,35 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Utilitários
 # ---------------------------------------------------------------------------
+
+_MESES_PT = {
+    "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+    "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+    "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro",
+}
+
+_MESES_CURTO_PT = {
+    "01": "jan", "02": "fev", "03": "mar", "04": "abr",
+    "05": "mai", "06": "jun", "07": "jul", "08": "ago",
+    "09": "set", "10": "out", "11": "nov", "12": "dez",
+}
+
+
+def _fmt_mes(mes: str) -> str:
+    if not mes or len(mes) < 7 or "-" not in mes:
+        return str(mes)
+    ano, m = mes[:4], mes[5:7]
+    nome = _MESES_PT.get(m)
+    return f"{nome} {ano}" if nome else mes
+
+
+def _fmt_mes_curto(mes: str) -> str:
+    if not mes or len(mes) < 7 or "-" not in mes:
+        return str(mes)
+    ano, m = mes[2:4], mes[5:7]
+    nome = _MESES_CURTO_PT.get(m)
+    return f"{nome}/{ano}" if nome else mes
+
 
 @st.cache_resource
 def _conectar():
@@ -39,14 +68,23 @@ def _meses_disponiveis() -> list[str]:
 
 
 def _fmt_brl(v: float | None) -> str:
-    if v is None:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
         return "—"
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _fmt_brl_md(v: float | None) -> str:
+    """Versão para textos Markdown/caption do Streamlit (escapa $ para não abrir KaTeX)."""
+    return _fmt_brl(v).replace("$", "\\$")
+
+
 def _nivel_badge(nivel: str | None) -> str:
-    cores = {"Bronze": "🟤", "Prata": "⚪", "Ouro": "🟡", "Diamante": "💎"}
-    return f"{cores.get(nivel, '')} {nivel}" if nivel else "—"
+    if nivel is None or (isinstance(nivel, float) and pd.isna(nivel)):
+        return "Sem classificação"
+    s = str(nivel).strip()
+    if not s or s.lower() in ("none", "nan"):
+        return "Sem classificação"
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -65,14 +103,6 @@ def _get_vendas_mes_data(mes: str):
                GROUP BY tipo""",
             (mes,),
         ).fetchall()
-        prod_setor = con.execute(
-            f"""SELECT p.funcao as setor, ROUND(SUM(v.valor),2) as total, COUNT(*) as qtd
-               FROM vendas v
-               JOIN profissionais p ON p.id = v.profissional_id
-               WHERE v.tipo='Produto' AND {db.mes_expr('v.data_hora')} = ?
-               GROUP BY p.funcao ORDER BY total DESC""",
-            (mes,),
-        ).fetchall()
         prof_rows = con.execute(
             f"""SELECT p.nome_sistema as profissional,
                       v.tipo,
@@ -84,7 +114,7 @@ def _get_vendas_mes_data(mes: str):
                ORDER BY total DESC""",
             (mes,),
         ).fetchall()
-    return [dict(r) for r in rows], [dict(r) for r in prod_setor], [dict(r) for r in prof_rows]
+    return [dict(r) for r in rows], [dict(r) for r in prof_rows]
 
 
 @st.cache_data(ttl=1800)
@@ -102,9 +132,9 @@ def _get_receita_hist():
 
 
 def _tab_vendas(con, mes: str):
-    st.subheader(f"Receita — {mes}")
+    st.subheader(f"Receita — {_fmt_mes(mes)}")
 
-    rows, prod_setor, prof_rows = _get_vendas_mes_data(mes)
+    rows, prof_rows = _get_vendas_mes_data(mes)
 
     total_mes = sum(r["total"] for r in rows)
     c1, c2, c3 = st.columns(3)
@@ -120,35 +150,76 @@ def _tab_vendas(con, mes: str):
     hist = _get_receita_hist()
     df_hist = pd.DataFrame(hist)
     if not df_hist.empty:
-        df_pivot = df_hist.pivot(index="mes", columns="tipo", values="total").fillna(0)
-        st.bar_chart(df_pivot, color=["#4e8cff", "#ff6b6b"])
-
-    st.divider()
-
-    # Produtos por setor
-    st.markdown("#### Venda de produtos por setor")
-    if prod_setor:
-        total_prod = sum(r["total"] for r in prod_setor)
-        df_prod = pd.DataFrame(prod_setor)
-        df_prod["% do total"] = (df_prod["total"] / total_prod * 100).round(1).astype(str) + "%"
-        df_prod["total_fmt"] = df_prod["total"].map(_fmt_brl)
-        st.dataframe(
-            df_prod[["setor", "total_fmt", "qtd", "% do total"]].rename(columns={
-                "setor": "Setor", "total_fmt": "Total produtos", "qtd": "Itens"
-            }),
-            width="stretch", hide_index=True,
+        df_hist["mes_curto"] = df_hist["mes"].map(_fmt_mes_curto)
+        df_hist["mes_nome"] = df_hist["mes"].map(_fmt_mes)
+        df_hist["total_fmt"] = df_hist["total"].map(_fmt_brl)
+        df_hist["ordem"] = df_hist["tipo"].map(lambda t: 1 if t == "Produto" else 2)
+        chart_hist = (
+            alt.Chart(df_hist)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "mes_curto:N",
+                    title=None,
+                    sort=alt.EncodingSortField(field="mes", order="ascending"),
+                    axis=alt.Axis(labelAngle=0),
+                ),
+                y=alt.Y("total:Q", title=None, axis=alt.Axis(format="~s")),
+                color=alt.Color(
+                    "tipo:N",
+                    title=None,
+                    scale=alt.Scale(
+                        domain=["Produto", "Serviço"],
+                        range=["#27272A", "#D4D4D8"],
+                    ),
+                    legend=alt.Legend(orient="top"),
+                ),
+                order=alt.Order("ordem:Q", sort="ascending"),
+                tooltip=[
+                    alt.Tooltip("mes_nome:N", title="Mês"),
+                    alt.Tooltip("tipo:N", title="Tipo"),
+                    alt.Tooltip("total_fmt:N", title="Valor"),
+                ],
+            )
+            .properties(height=300)
         )
-        st.bar_chart(df_prod.set_index("setor")[["total"]])
-        st.caption(f"Total geral de produtos no mês: {_fmt_brl(total_prod)}")
+        st.altair_chart(chart_hist, use_container_width=True)
 
     st.divider()
 
-    # Top profissionais no mês
+    # Receita por profissional no mês (pivotada: Profissional | Serviço | Produtos | Total)
     st.markdown("#### Receita por profissional no mês")
     if prof_rows:
         df_prof = pd.DataFrame(prof_rows)
-        df_prof["total"] = df_prof["total"].map(lambda v: f"R$ {v:,.2f}")
-        st.dataframe(df_prof, width="stretch", hide_index=True)
+        df_piv = df_prof.pivot_table(
+            index="profissional",
+            columns="tipo",
+            values="total",
+            aggfunc="sum",
+            fill_value=0.0,
+        ).reset_index()
+        if "Serviço" not in df_piv.columns:
+            df_piv["Serviço"] = 0.0
+        if "Produto" not in df_piv.columns:
+            df_piv["Produto"] = 0.0
+        df_piv["Total"] = df_piv["Serviço"] + df_piv["Produto"]
+        df_piv = df_piv.sort_values("Total", ascending=False)
+        df_exib = pd.DataFrame({
+            "Profissional": df_piv["profissional"],
+            "Serviço": df_piv["Serviço"].astype(float),
+            "Produtos": df_piv["Produto"].astype(float),
+            "Total": df_piv["Total"].astype(float),
+        })
+        st.dataframe(
+            df_exib,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Serviço": st.column_config.NumberColumn("Serviço", format="R$ %.2f"),
+                "Produtos": st.column_config.NumberColumn("Produtos", format="R$ %.2f"),
+                "Total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +286,12 @@ def _publicar(con, mes: str, politica: str, linhas: list[dict]) -> None:
 
 
 def _bloco_apuracao(con, mes: str, politica: str, label: str, linhas: list[dict],
-                    col_extra: list[str], rename: dict) -> float:
+                    col_extra: list[str], rename: dict, pode_publicar: bool = True) -> float:
     """Renderiza bloco de apuração com botão publicar / badge publicado."""
     pub = _apuracao_publicada(con, mes, politica)
 
     if pub:
-        st.success(f"✅ Publicada em {pub['publicada_em']} — exibindo snapshot imutável.")
+        st.success(f"Publicada em {pub['publicada_em']} — exibindo snapshot imutável.")
         linhas_exib = pub["payload"]
     else:
         linhas_exib = linhas
@@ -232,27 +303,34 @@ def _bloco_apuracao(con, mes: str, politica: str, label: str, linhas: list[dict]
 
     if "nivel" in df.columns:
         df["nivel"] = df["nivel"].apply(_nivel_badge)
-    for col in ["faturamento", "gratificacao", "receita"]:
-        if col in df.columns:
-            df[col] = df[col].map(_fmt_brl)
-    if "ticket_medio" in df.columns:
-        df["ticket_medio"] = df["ticket_medio"].map(lambda v: "—" if v is None else f"R$ {v:.2f}")
     if "elegivel" in df.columns:
         if "elegivel" in col_extra:
             df["elegivel"] = df["elegivel"].map(
-                lambda v: "✅ Sim" if v is True or str(v).lower() == "true" else "— Não"
+                lambda v: "Sim" if v is True or str(v).lower() == "true" else "Não"
             )
         else:
             df = df[df["elegivel"].astype(str).isin(["True", "true", True])]
 
     cols_show = [c for c in col_extra if c in df.columns]
-    st.dataframe(df[cols_show].rename(columns=rename), width="stretch", hide_index=True)
+    col_cfg = {}
+    for col in ["faturamento", "gratificacao", "receita", "ticket_medio"]:
+        if col in cols_show:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+            col_label = rename.get(col, col)
+            col_cfg[col_label] = st.column_config.NumberColumn(col_label, format="R$ %.2f")
+
+    st.dataframe(
+        df[cols_show].rename(columns=rename),
+        width="stretch",
+        hide_index=True,
+        column_config=col_cfg,
+    )
 
     grat = sum(r.get("gratificacao", 0) for r in linhas_exib)
-    st.caption(f"Subtotal {label.lower()}: {_fmt_brl(grat)}")
+    st.caption(f"Subtotal {label.lower()}: {_fmt_brl_md(grat)}")
 
-    if not pub:
-        if st.button(f"Publicar apuração — {label} {mes}", key=f"pub_{politica}_{mes}"):
+    if not pub and pode_publicar:
+        if st.button(f"Publicar apuração — {label} {_fmt_mes(mes)}", key=f"pub_{politica}_{mes}"):
             _publicar(con, mes, politica, linhas)
             st.success("Apuração publicada! Recarregue para ver o badge.")
             st.rerun()
@@ -261,12 +339,12 @@ def _bloco_apuracao(con, mes: str, politica: str, label: str, linhas: list[dict]
 
 
 # ---------------------------------------------------------------------------
-# Aba 2 — Apuração (com Cache de Dados e Resumo Consolidado de Pagamentos)
+# Aba 3 — Apuração (com Cache de Dados e Resumo Consolidado de Pagamentos)
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=600)
 def _dados_apuracao_cached(mes: str):
-    from src.apuracao_barbeiros import apurar_barbeiros, resumo_setor
+    from src.apuracao_barbeiros import apurar_barbeiros, resumo_setor, _stats_mes
     from src.apuracao_faturamento import apurar_faturamento, apurar_recepcao_caixa, _get_params_fat
 
     with db.conectar() as con:
@@ -274,7 +352,20 @@ def _dados_apuracao_cached(mes: str):
             barb = apurar_barbeiros(mes, con)
             setor = resumo_setor(mes, con)
         except ValueError:
-            barb, setor = [], None
+            stats = _stats_mes(mes, con)
+            barb = [
+                {
+                    "nome": nome,
+                    "atendimentos": atend,
+                    "receita": round(receita, 2),
+                    "ticket_medio": round(receita / atend, 2) if atend else 0.0,
+                    "nivel": None,
+                    "gratificacao": 0.0,
+                    "modelo": "sem_politica",
+                }
+                for nome, (atend, receita) in stats.items()
+            ]
+            setor = None
 
         manic = apurar_faturamento(mes, "manicures", con)
         for r in manic:
@@ -306,7 +397,7 @@ def _dados_apuracao_cached(mes: str):
     for r in barb:
         if r.get("modelo") == "setor_tm":
             if r.get("piso_bronze") is not None:
-                r["metas"] = f"B: {r['piso_bronze']:.2f} | P: {r['piso_prata']:.2f} | O: {r['piso_ouro']:.2f}"
+                r["metas"] = f"B: {_fmt_brl(r['piso_bronze'])} | P: {_fmt_brl(r['piso_prata'])} | O: {_fmt_brl(r['piso_ouro'])}"
             elif r.get("tm_base") is not None:
                 r["metas"] = f"Base: {_fmt_brl(r['tm_base'])}"
             else:
@@ -316,7 +407,7 @@ def _dados_apuracao_cached(mes: str):
 
 
 def _tab_apuracao(con, mes: str):
-    st.subheader(f"Apuração do mês — {mes}")
+    st.subheader(f"Apuração do mês — {_fmt_mes(mes)}")
 
     barb, setor, manic, assist, recep, metas_recep_str = _dados_apuracao_cached(mes)
 
@@ -328,7 +419,7 @@ def _tab_apuracao(con, mes: str):
     )
 
     # 1. Resumo Executivo Consolidado de Pagamentos
-    st.markdown("### 🏆 Resumo Consolidado de Pagamentos")
+    st.markdown("### Resumo Consolidado de Pagamentos")
     st.caption("Quadro geral trazendo quem vai receber e quanto vai receber com base nas metas atingidas:")
 
     premiados = []
@@ -343,7 +434,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Barbeiro",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": criterio_barb,
-                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
+                "Valor a Receber": float(r.get("gratificacao", 0)),
             })
     for r in manic:
         if r.get("gratificacao", 0) > 0:
@@ -352,7 +443,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Manicure",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Faturamento de {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
+                "Valor a Receber": float(r.get("gratificacao", 0)),
             })
     for r in assist:
         if r.get("gratificacao", 0) > 0:
@@ -361,7 +452,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Assistente",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Faturamento de {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
+                "Valor a Receber": float(r.get("gratificacao", 0)),
             })
     for r in recep:
         if r.get("gratificacao", 0) > 0:
@@ -370,37 +461,22 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Recepção / Caixa",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Venda individual {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
+                "Valor a Receber": float(r.get("gratificacao", 0)),
             })
 
     if premiados:
         df_prem = pd.DataFrame(premiados)
-        st.dataframe(df_prem, width="stretch", hide_index=True)
-        st.success(f"💰 **Total Geral de Gratificações a Pagar:** {_fmt_brl(total_grat)} ({len(premiados)} colaboradores premiados)")
-    else:
-        st.info(f"Nenhum colaborador com gratificação consolidada até o momento para {mes}. (Mês em andamento — metas são oficializadas no fechamento).")
-
-    # Botão de download do relatório HTML
-    html_file = f"apuracao_{mes.replace('-', '_')}.html"
-    html_path = os.path.join(os.path.dirname(__file__), "..", html_file)
-    if not os.path.exists(html_path):
-        html_file = "apuracao_outubro_2026.html"
-        html_path = os.path.join(os.path.dirname(__file__), "..", html_file)
-
-    if os.path.exists(html_path):
-        with open(html_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-
-        c_down1, c_down2 = st.columns([1.5, 2])
-        c_down1.download_button(
-            label="📥 Baixar Relatório HTML para Apresentação",
-            data=html_content,
-            file_name=html_file,
-            mime="text/html",
+        st.dataframe(
+            df_prem,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Valor a Receber": st.column_config.NumberColumn("Valor a Receber", format="R$ %.2f"),
+            },
         )
-        with st.expander("📄 Visualizar Relatório Executivo Completo (Apresentação / Impressão)", expanded=False):
-            import streamlit.components.v1 as components
-            components.html(html_content, height=900, scrolling=True)
+        st.success(f"**Total Geral de Gratificações a Pagar:** {_fmt_brl_md(total_grat)} ({len(premiados)} colaboradores premiados)")
+    else:
+        st.info(f"Nenhum colaborador com gratificação consolidada até o momento para {_fmt_mes(mes)}.")
 
     st.divider()
 
@@ -409,46 +485,63 @@ def _tab_apuracao(con, mes: str):
     modelo_barb = barb[0].get("modelo") if barb else ("setor_tm" if setor else None)
     if modelo_barb == "setor_tm":
         if setor:
-            _aviso_mes_parcial(con, mes, setor)
-            m = {n: _fmt_brl(setor["metas"][n]).replace("$", "\\$") for n in ("Bronze", "Prata", "Ouro")}
+            if setor["metas"]:
+                _aviso_mes_parcial(con, mes, setor)
             c1, c2, c3 = st.columns(3)
-            c1.metric(
-                "Faturamento do setor",
-                _fmt_brl(setor["faturamento"]),
-                f"{setor['variacao_pct']:+.1f}% vs base {_fmt_brl(setor['base'])}",
+            delta_str = (
+                f"{setor['variacao_pct']:+.1f}% vs base {_fmt_brl(setor['base'])}"
+                if setor["variacao_pct"] is not None and setor["base"] is not None
+                else None
             )
-            c2.metric("Nível do setor (Gate)", _nivel_badge(setor["nivel"]) if setor["nivel"] else "Nenhum")
-            prox = next((n for n in ("Bronze", "Prata", "Ouro") if setor["faturamento"] < setor["metas"][n]), None)
-            if prox:
-                c3.metric(f"Falta para {prox}", _fmt_brl(setor["metas"][prox] - setor["faturamento"]))
-            else:
-                c3.metric("Meta Ouro", "Atingida!")
-            st.info(
-                f"🎯 **Metas Coletivas do Setor (Gate):** Bronze ≥ **{m['Bronze']}** · Prata ≥ **{m['Prata']}** · Ouro ≥ **{m['Ouro']}**\n\n"
-                f"*(Base: {_fmt_brl(setor['base']).replace('$', chr(92) + '$')} — média dos 3 meses anteriores. Nível efetivo = menor entre setor e TM individual)*"
-            )
+            c1.metric("Faturamento do setor", _fmt_brl(setor["faturamento"]), delta_str)
+            c2.metric("Nível do setor (Gate)", _nivel_badge(setor["nivel"]))
+            if setor["metas"]:
+                prox = next((n for n in ("Bronze", "Prata", "Ouro") if setor["faturamento"] < setor["metas"][n]), None)
+                if prox:
+                    c3.metric(f"Falta para {prox}", _fmt_brl(setor["metas"][prox] - setor["faturamento"]))
+                else:
+                    c3.metric("Meta Ouro", "Atingida")
+                m = {n: _fmt_brl(setor["metas"][n]).replace("$", "\\$") for n in ("Bronze", "Prata", "Ouro")}
+                st.info(
+                    f"**Metas Coletivas do Setor (Gate):** Bronze ≥ **{m['Bronze']}** · Prata ≥ **{m['Prata']}** · Ouro ≥ **{m['Ouro']}**\n\n"
+                    f"*(Base: {_fmt_brl(setor['base']).replace('$', chr(92) + '$')} — média dos 3 meses anteriores. Nível efetivo = menor entre setor e TM individual)*"
+                )
 
         _bloco_apuracao(
             con, mes, "barbeiros", "Barbeiros", barb,
-            col_extra=["nome", "atendimentos", "ticket_medio", "metas", "nivel_tm", "nivel", "gratificacao"],
-            rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM (R$)",
-                    "metas": "Metas TM (B/P/O)",
-                    "nivel_tm": "Nível TM", "nivel": "Nível", "gratificacao": "Gratificação"},
+            col_extra=["nome", "atendimentos", "ticket_medio", "receita", "metas", "nivel", "gratificacao"],
+            rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM",
+                    "receita": "Faturamento", "metas": "Metas TM (B/P/O)",
+                    "nivel": "Nível", "gratificacao": "Gratificação"},
         )
     elif modelo_barb == "legado":
+        fat_geral = sum(r.get("receita", 0) for r in barb)
+        st.metric("Faturamento geral dos barbeiros", _fmt_brl(fat_geral))
         st.info(
-            "🎯 **Critério (Modelo Legado v1):** Ticket Médio vs. metas absolutas — "
+            "**Critério (Modelo Legado v1):** Ticket Médio vs. metas absolutas — "
             "Bronze ≥ **R\\$ 120,00** · Prata ≥ **R\\$ 135,00** · Ouro ≥ **R\\$ 150,00** "
             "(elegibilidade: ≥ 50 atendimentos)."
         )
         _bloco_apuracao(
             con, mes, "barbeiros", "Barbeiros", barb,
-            col_extra=["nome", "atendimentos", "ticket_medio", "elegivel", "nivel", "gratificacao"],
-            rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM (R$)",
-                    "elegivel": "Elegível", "nivel": "Nível", "gratificacao": "Gratificação"},
+            col_extra=["nome", "atendimentos", "ticket_medio", "receita", "elegivel", "nivel", "gratificacao"],
+            rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM",
+                    "receita": "Faturamento", "elegivel": "Elegível",
+                    "nivel": "Nível", "gratificacao": "Gratificação"},
+        )
+    elif modelo_barb == "sem_politica":
+        fat_geral = sum(r.get("receita", 0) for r in barb)
+        st.metric("Faturamento geral dos barbeiros", _fmt_brl(fat_geral))
+        st.caption(f"Sem política de gratificação vigente para {_fmt_mes(mes)} — exibindo apenas a base de serviços.")
+        _bloco_apuracao(
+            con, mes, "barbeiros", "Barbeiros", barb,
+            col_extra=["nome", "atendimentos", "ticket_medio", "receita", "nivel", "gratificacao"],
+            rename={"nome": "Barbeiro", "atendimentos": "Atend.", "ticket_medio": "TM",
+                    "receita": "Faturamento", "nivel": "Nível", "gratificacao": "Gratificação"},
+            pode_publicar=False,
         )
     else:
-        st.info(f"Nenhuma política de gratificação vigente ou sem movimento de barbeiros em {mes}.")
+        st.info(f"Sem movimento de barbeiros em {_fmt_mes(mes)}.")
 
     st.markdown("#### Manicures")
     _bloco_apuracao(
@@ -468,7 +561,8 @@ def _tab_apuracao(con, mes: str):
 
     st.markdown("#### Recepção / Caixa")
     total_setor_recep = recep[0]["total_setor"] if recep else 0.0
-    st.caption(f"Meta coletiva de produtos — total do setor: {_fmt_brl(total_setor_recep)} ({metas_recep_str})")
+    metas_recep_md = metas_recep_str.replace("$", "\\$")
+    st.caption(f"Meta coletiva de produtos — total do setor: {_fmt_brl_md(total_setor_recep)} ({metas_recep_md})")
     _bloco_apuracao(
         con, mes, "recepcao_caixa", "Recepção/Caixa", recep,
         col_extra=["nome", "faturamento", "metas", "nivel", "gratificacao"],
@@ -600,7 +694,7 @@ def _tab_parametros(con):
                         label, value=val_atual, key=f"{politica}_{chave}"
                     )
 
-                salvar = st.form_submit_button("💾 Salvar nova vigência")
+                salvar = st.form_submit_button("Salvar nova vigência")
 
             if salvar:
                 vig_str = vig_inicio.strftime("%Y-%m-%d")
@@ -638,7 +732,7 @@ def _tab_parametros(con):
                     st.dataframe(df_h, width="stretch", hide_index=True)
 
     st.divider()
-    st.markdown("### 👤 Parâmetros Individuais por Profissional")
+    st.markdown("### Parâmetros Individuais por Profissional")
     st.caption("Metas e baselines atribuídos a profissionais específicos (ex: Manicures, Pedro Ian).")
     indiv_rows = con.execute(
         """SELECT profissional, politica, chave, valor, vigencia_inicio, vigencia_fim, alterado_por
@@ -662,7 +756,7 @@ def _tab_parametros(con):
         )
 
     # Formulário para definir/alterar Base de TM de Barbeiro
-    with st.expander("➕ Definir Base de TM para Barbeiro (Provisória / Individual)", expanded=False):
+    with st.expander("Definir Base de TM para Barbeiro (Provisória / Individual)", expanded=False):
         barbeiros_rows = con.execute(
             "SELECT nome_sistema FROM profissionais WHERE funcao='barbeiro' AND ativo=1 ORDER BY nome_sistema"
         ).fetchall()
@@ -673,7 +767,7 @@ def _tab_parametros(con):
             base_val = st.number_input("Valor da Base de TM (R$)", min_value=50.0, max_value=500.0, value=122.93, step=1.0)
             vig_barb = st.date_input("Vigência a partir de", value=date.today(), key="vig_barb")
             autor_barb = st.text_input("Alterado por", value="Arthur", key="autor_barb")
-            salvar_barb = st.form_submit_button("💾 Salvar Base Individual")
+            salvar_barb = st.form_submit_button("Salvar Base Individual")
 
         if salvar_barb:
             vig_b_str = vig_barb.strftime("%Y-%m-%d")
@@ -691,29 +785,18 @@ def _tab_parametros(con):
                 (f"{base_val:.2f}", vig_b_str, autor_barb, agora_b, barb_sel),
             )
             con.commit()
-            st.success(f"Base de TM de R$ {base_val:.2f} salva para {barb_sel} a partir de {vig_b_str}!")
+            st.success(f"Base de TM de {_fmt_brl(base_val)} salva para {barb_sel} a partir de {vig_b_str}!")
             st.rerun()
 
 
 # ---------------------------------------------------------------------------
-# Aba 4 — Análise Individual (com Cache e Renderização Leve)
+# Aba 2 — Análise Individual (com Cache e Renderização Leve)
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=600)
 def _dados_analise_individual_cached(mes: str, setor_sel: str):
-    import unicodedata
     from collections import defaultdict
 
-    val_keywords = ["barba", "sobrancelha", "ozônio", "ozonio", "hidratação", "hidratacao", "nutrição", "nutricao", "desondulação", "desondulacao", "combo"]
-
-    def _is_valor(item_name: str) -> bool:
-        nome_norm = unicodedata.normalize('NFD', item_name).encode('ascii', 'ignore').decode('utf-8').lower()
-        for kw in val_keywords:
-            if kw in nome_norm:
-                return True
-        return False
-
-    setor_filter = ""
     params_prof = [mes]
     if setor_sel != "Todos":
         setor_filter = "AND p.funcao = ?"
@@ -771,28 +854,9 @@ def _dados_analise_individual_cached(mes: str, setor_sel: str):
         receita = p["receita"]
         atendimentos = p["atendimentos"]
         tm = receita / atendimentos if atendimentos else 0
-        
+
         itens = itens_por_prof.get(prof_id, [])
         itens.sort(key=lambda x: x["receita_item"], reverse=True)
-        
-        diversidade = len(itens)
-        top_1_receita = itens[0]["receita_item"] if itens else 0
-        concentracao = top_1_receita / receita if receita else 0
-        
-        atendimentos_valor = sum(it["qtd_item"] for it in itens if _is_valor(it["item"]))
-        taxa_agregados = atendimentos_valor / atendimentos if atendimentos else 0
-        
-        if concentracao > 0.70 or taxa_agregados < 0.10:
-            badge = "🔴 Concentrado"
-            frase = f"{(concentracao*100):.0f}% da receita vem do top serviço. Baixa taxa de agregados ({(taxa_agregados*100):.0f}%)."
-            if taxa_agregados < 0.10:
-                frase += " Focar em oferecer adicionais/combos."
-        elif concentracao > 0.50 or taxa_agregados < 0.25:
-            badge = "🟡 Atenção"
-            frase = f"Concentração moderada ({(concentracao*100):.0f}%). Oportunidade para aumentar upsell."
-        else:
-            badge = "🟢 Bom mix"
-            frase = f"Boa diversificação. Taxa de agregados saudável ({(taxa_agregados*100):.0f}%)."
 
         resultados.append({
             "id": prof_id,
@@ -802,11 +866,6 @@ def _dados_analise_individual_cached(mes: str, setor_sel: str):
             "receita": receita,
             "atendimentos": atendimentos,
             "itens": itens,
-            "concentracao": concentracao,
-            "diversidade": diversidade,
-            "taxa_agregados": taxa_agregados,
-            "badge": badge,
-            "frase": frase
         })
 
     resultados.sort(key=lambda x: x["tm"], reverse=True)
@@ -814,10 +873,16 @@ def _dados_analise_individual_cached(mes: str, setor_sel: str):
 
 
 def _tab_analise_individual(con, mes: str):
-    st.subheader(f"Análise Individual — {mes}")
+    st.subheader(f"Análise Individual — {_fmt_mes(mes)}")
 
     setores_opcoes = ["Todos", "barbeiro", "manicure", "assistente"]
-    setor_sel = st.selectbox("Filtrar por Setor", setores_opcoes, format_func=lambda x: "Todos os setores" if x == "Todos" else x.capitalize())
+    col_setor, _ = st.columns([1, 3])
+    with col_setor:
+        setor_sel = st.selectbox(
+            "Filtrar por Setor",
+            setores_opcoes,
+            format_func=lambda x: "Todos os setores" if x == "Todos" else x.capitalize(),
+        )
 
     tm_setor, resultados = _dados_analise_individual_cached(mes, setor_sel)
 
@@ -825,47 +890,52 @@ def _tab_analise_individual(con, mes: str):
         st.info("Nenhum atendimento encontrado para os filtros selecionados neste mês.")
         return
 
-    st.markdown(f"**Média do setor selecionado (Ticket Médio):** {_fmt_brl(tm_setor)}")
+    st.markdown(f"**Média do setor selecionado (Ticket Médio):** {_fmt_brl_md(tm_setor)}")
 
     for res in resultados:
         with st.container(border=True):
-            col1, col2 = st.columns([1.3, 1])
-            with col1:
-                st.markdown(f"### {res['nome']} | `{res['funcao'].capitalize()}`")
-                
-                delta_tm = ((res['tm'] / tm_setor) - 1) * 100 if tm_setor else 0
-                delta_color = "normal" if delta_tm >= 0 else "inverse"
-                
-                mc1, mc2, mc3 = st.columns([1.5, 1, 1.2])
-                mc1.metric("Ticket Médio", _fmt_brl(res['tm']), f"{delta_tm:+.1f}%", delta_color=delta_color)
-                mc2.metric("Atend.", res['atendimentos'])
-                mc3.metric("Receita", _fmt_brl(res['receita']))
-                
-                st.markdown(f"**Qualidade do Mix:** {res['badge']}")
-                st.caption(res['frase'])
-                
-            with col2:
-                if res['itens']:
-                    top_itens = sorted(res['itens'], key=lambda x: x["receita_item"], reverse=True)[:3]
-                    top_str = " · ".join([f"{it['item']} ({_fmt_brl(it['receita_item'])})" for it in top_itens])
-                    st.caption(f"**Top serviços:** {top_str}")
-                    with st.expander("📊 Ver gráfico do mix de serviços", expanded=False):
-                        import altair as alt
-                        df_itens = pd.DataFrame(res['itens']).nlargest(5, 'receita_item')
-                        df_itens['item_label'] = [f"{i+1}. {row['item']}" for i, row in enumerate(df_itens.to_dict('records'))]
-                        chart = alt.Chart(df_itens).mark_bar(size=40).encode(
-                            x=alt.X('receita_item:Q', stack='zero', title=None, axis=alt.Axis(format="~s")),
-                            y=alt.Y('prof_id:N', title=None, axis=alt.Axis(labels=False, ticks=False, domain=False)),
-                            color=alt.Color('item_label:N', 
-                                            sort=alt.EncodingSortField(field="receita_item", op="max", order="descending"),
-                                            legend=alt.Legend(title=None, orient="bottom", labelLimit=0)),
-                            order=alt.Order('receita_item:Q', sort='descending'),
-                            tooltip=[alt.Tooltip('item:N', title='Serviço'), 
-                                     alt.Tooltip('receita_item:Q', title='Receita (R$)', format=",.2f")]
-                        ).properties(height=200)
-                        st.altair_chart(chart, use_container_width=True)
-                else:
-                    st.write("Sem itens")
+            st.markdown(f"#### {res['nome']} · {res['funcao'].capitalize()}")
+
+            delta_tm = ((res["tm"] / tm_setor) - 1) * 100 if tm_setor else 0
+            delta_color = "normal" if delta_tm >= 0 else "inverse"
+
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("Ticket Médio", _fmt_brl(res["tm"]), f"{delta_tm:+.1f}%", delta_color=delta_color)
+            mc2.metric("Atendimentos", res["atendimentos"])
+            mc3.metric("Receita", _fmt_brl(res["receita"]))
+
+            if res["itens"]:
+                top_itens = sorted(res["itens"], key=lambda x: x["receita_item"], reverse=True)[:3]
+                top_str = " · ".join([f"{it['item']} ({_fmt_brl_md(it['receita_item'])})" for it in top_itens])
+                st.caption(f"**Top serviços:** {top_str}")
+
+                df_itens = pd.DataFrame(res["itens"]).nlargest(5, "receita_item")
+                total_prof = res["receita"] or df_itens["receita_item"].sum()
+                df_itens["receita_fmt"] = df_itens["receita_item"].map(_fmt_brl)
+                df_itens["pct_fmt"] = (df_itens["receita_item"] / total_prof * 100).map(lambda p: f"{p:.1f}%")
+
+                max_val = float(df_itens["receita_item"].max()) if not df_itens.empty else 0.0
+                x_scale = alt.Scale(domain=[0, max_val * 1.28]) if max_val > 0 else alt.Undefined
+
+                base = alt.Chart(df_itens).encode(
+                    y=alt.Y("item:N", sort="-x", title=None, axis=alt.Axis(labelLimit=180)),
+                    x=alt.X("receita_item:Q", title=None, axis=alt.Axis(format="~s"), scale=x_scale),
+                )
+                bars = base.mark_bar(color="#27272A", cornerRadiusEnd=3, size=18).encode(
+                    tooltip=[
+                        alt.Tooltip("item:N", title="Serviço"),
+                        alt.Tooltip("receita_fmt:N", title="Receita"),
+                        alt.Tooltip("pct_fmt:N", title="% da receita"),
+                    ]
+                )
+                labels = base.mark_text(
+                    align="left", baseline="middle", dx=6, color="#52525B", fontSize=11
+                ).encode(text="receita_fmt:N")
+
+                chart = (bars + labels).properties(height=max(120, len(df_itens) * 32 + 20))
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.caption("Sem serviços registrados no mês.")
 
 
 # ---------------------------------------------------------------------------
@@ -886,22 +956,22 @@ def main():
         st.warning("Nenhum dado importado. Rode `python src/ingestao.py <arquivo.xlsx>`.")
         return
 
-    st.title("✂️ Gansos Hub")
+    st.title("Gansos Hub")
 
-    with st.sidebar:
-        st.header("Filtros")
-        mes_sel = st.selectbox("Mês", meses, index=0)
+    col_mes, _ = st.columns([1, 3])
+    with col_mes:
+        mes_sel = st.selectbox("Mês", meses, index=0, format_func=_fmt_mes)
 
-    t1, t2, t3, t4 = st.tabs(["📊 Vendas", "📋 Apuração", "⚙️ Parâmetros", "🎯 Análise Individual"])
+    t1, t2, t3, t4 = st.tabs(["Vendas", "Análise Individual", "Apuração", "Parâmetros"])
 
     with t1:
         _tab_vendas(con, mes_sel)
     with t2:
-        _tab_apuracao(con, mes_sel)
-    with t3:
-        _tab_parametros(con)
-    with t4:
         _tab_analise_individual(con, mes_sel)
+    with t3:
+        _tab_apuracao(con, mes_sel)
+    with t4:
+        _tab_parametros(con)
 
 
 if __name__ == "__main__":

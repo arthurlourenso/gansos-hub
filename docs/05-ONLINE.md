@@ -109,9 +109,12 @@ local atual; o "go live" real só na F5, depois da F3.
   definitiva: migrar `db.py` para `psycopg` (psycopg3), que tem wheel p/ 3.14,
   removendo a dependência da versão do Python. Pequena mudança + teste local
   contra o Supabase.
+- **App ainda PÚBLICO (risco aberto).** Já está no ar, mas não foi marcado como
+  privado — qualquer um com a URL vê a folha de comissão. Ação pendente: no
+  Community Cloud, deixar privado e convidar só os e-mails de você + gerência.
 - **F3 — Autenticação por código** (login por usuário, você + gerência). Deixada
-  por último a pedido; no interim, o app sobe **privado** no Community Cloud
-  (acesso só por e-mail convidado). Candidato: `streamlit-authenticator`.
+  por último a pedido; o interim é o modo privado do Community Cloud (acima).
+  Candidato: `streamlit-authenticator`.
 - **Refrescar o golden do H1** (`golden_numbers.json`). Está congelado em
   jan–ago/2026 (989 produtos); os dados já vão até novembro, então
   `test_h1_total_linhas/valor` falham nos dois bancos. Atualizar para o CI (F5)
