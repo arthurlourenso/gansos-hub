@@ -911,28 +911,32 @@ def _tab_analise_individual(con, mes: str):
 
                 df_itens = pd.DataFrame(res["itens"]).nlargest(5, "receita_item")
                 total_prof = res["receita"] or df_itens["receita_item"].sum()
+                df_itens["item_label"] = [f"{i + 1}. {row['item']}" for i, row in enumerate(df_itens.to_dict("records"))]
                 df_itens["receita_fmt"] = df_itens["receita_item"].map(_fmt_brl)
                 df_itens["pct_fmt"] = (df_itens["receita_item"] / total_prof * 100).map(lambda p: f"{p:.1f}%")
 
-                max_val = float(df_itens["receita_item"].max()) if not df_itens.empty else 0.0
-                x_scale = alt.Scale(domain=[0, max_val * 1.28]) if max_val > 0 else alt.Undefined
-
-                base = alt.Chart(df_itens).encode(
-                    y=alt.Y("item:N", sort="-x", title=None, axis=alt.Axis(labelLimit=180)),
-                    x=alt.X("receita_item:Q", title=None, axis=alt.Axis(format="~s"), scale=x_scale),
+                tons_cinza = ["#27272A", "#52525B", "#71717A", "#A1A1AA", "#D4D4D8"]
+                chart = (
+                    alt.Chart(df_itens)
+                    .mark_bar(size=28)
+                    .encode(
+                        x=alt.X("receita_item:Q", stack="zero", title=None, axis=alt.Axis(format="~s")),
+                        y=alt.Y("prof_id:N", title=None, axis=alt.Axis(labels=False, ticks=False, domain=False)),
+                        color=alt.Color(
+                            "item_label:N",
+                            sort=alt.EncodingSortField(field="receita_item", op="max", order="descending"),
+                            scale=alt.Scale(range=tons_cinza),
+                            legend=alt.Legend(title=None, orient="bottom", columns=2, labelLimit=160),
+                        ),
+                        order=alt.Order("receita_item:Q", sort="descending"),
+                        tooltip=[
+                            alt.Tooltip("item:N", title="Serviço"),
+                            alt.Tooltip("receita_fmt:N", title="Receita"),
+                            alt.Tooltip("pct_fmt:N", title="% da receita"),
+                        ],
+                    )
+                    .properties(height=140)
                 )
-                bars = base.mark_bar(color="#27272A", cornerRadiusEnd=3, size=18).encode(
-                    tooltip=[
-                        alt.Tooltip("item:N", title="Serviço"),
-                        alt.Tooltip("receita_fmt:N", title="Receita"),
-                        alt.Tooltip("pct_fmt:N", title="% da receita"),
-                    ]
-                )
-                labels = base.mark_text(
-                    align="left", baseline="middle", dx=6, color="#52525B", fontSize=11
-                ).encode(text="receita_fmt:N")
-
-                chart = (bars + labels).properties(height=max(120, len(df_itens) * 32 + 20))
                 st.altair_chart(chart, use_container_width=True)
             else:
                 st.caption("Sem serviços registrados no mês.")
