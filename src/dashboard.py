@@ -140,7 +140,7 @@ def _tab_vendas(con, mes: str):
     c1, c2, c3 = st.columns(3)
     for r in rows:
         col = c1 if r["tipo"] == "Serviço" else c2
-        col.metric(r["tipo"], _fmt_brl(r["total"]), f"{r['qtd']} lançamentos")
+        col.metric(r["tipo"], _fmt_brl(r["total"]), f"{r['qtd']} lançamentos", delta_color="off")
     c3.metric("Total geral", _fmt_brl(total_mes))
 
     st.divider()
@@ -183,7 +183,7 @@ def _tab_vendas(con, mes: str):
             )
             .properties(height=300)
         )
-        st.altair_chart(chart_hist, use_container_width=True)
+        st.altair_chart(chart_hist, width="stretch")
 
     st.divider()
 
@@ -206,20 +206,11 @@ def _tab_vendas(con, mes: str):
         df_piv = df_piv.sort_values("Total", ascending=False)
         df_exib = pd.DataFrame({
             "Profissional": df_piv["profissional"],
-            "Serviço": df_piv["Serviço"].astype(float),
-            "Produtos": df_piv["Produto"].astype(float),
-            "Total": df_piv["Total"].astype(float),
+            "Serviço": df_piv["Serviço"].map(_fmt_brl),
+            "Produtos": df_piv["Produto"].map(_fmt_brl),
+            "Total": df_piv["Total"].map(_fmt_brl),
         })
-        st.dataframe(
-            df_exib,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Serviço": st.column_config.NumberColumn("Serviço", format="R$ %.2f"),
-                "Produtos": st.column_config.NumberColumn("Produtos", format="R$ %.2f"),
-                "Total": st.column_config.NumberColumn("Total", format="R$ %.2f"),
-            },
-        )
+        st.dataframe(df_exib, width="stretch", hide_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -312,18 +303,14 @@ def _bloco_apuracao(con, mes: str, politica: str, label: str, linhas: list[dict]
             df = df[df["elegivel"].astype(str).isin(["True", "true", True])]
 
     cols_show = [c for c in col_extra if c in df.columns]
-    col_cfg = {}
     for col in ["faturamento", "gratificacao", "receita", "ticket_medio"]:
         if col in cols_show:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-            col_label = rename.get(col, col)
-            col_cfg[col_label] = st.column_config.NumberColumn(col_label, format="R$ %.2f")
+            df[col] = df[col].map(_fmt_brl)
 
     st.dataframe(
         df[cols_show].rename(columns=rename),
         width="stretch",
         hide_index=True,
-        column_config=col_cfg,
     )
 
     grat = sum(r.get("gratificacao", 0) for r in linhas_exib)
@@ -434,7 +421,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Barbeiro",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": criterio_barb,
-                "Valor a Receber": float(r.get("gratificacao", 0)),
+                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
             })
     for r in manic:
         if r.get("gratificacao", 0) > 0:
@@ -443,7 +430,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Manicure",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Faturamento de {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": float(r.get("gratificacao", 0)),
+                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
             })
     for r in assist:
         if r.get("gratificacao", 0) > 0:
@@ -452,7 +439,7 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Assistente",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Faturamento de {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": float(r.get("gratificacao", 0)),
+                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
             })
     for r in recep:
         if r.get("gratificacao", 0) > 0:
@@ -461,19 +448,12 @@ def _tab_apuracao(con, mes: str):
                 "Setor": "Recepção / Caixa",
                 "Meta / Nível": _nivel_badge(r.get("nivel")),
                 "Critério / Desempenho": f"Venda individual {_fmt_brl(r.get('faturamento'))}",
-                "Valor a Receber": float(r.get("gratificacao", 0)),
+                "Valor a Receber": _fmt_brl(r.get("gratificacao", 0)),
             })
 
     if premiados:
         df_prem = pd.DataFrame(premiados)
-        st.dataframe(
-            df_prem,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Valor a Receber": st.column_config.NumberColumn("Valor a Receber", format="R$ %.2f"),
-            },
-        )
+        st.dataframe(df_prem, width="stretch", hide_index=True)
         st.success(f"**Total Geral de Gratificações a Pagar:** {_fmt_brl_md(total_grat)} ({len(premiados)} colaboradores premiados)")
     else:
         st.info(f"Nenhum colaborador com gratificação consolidada até o momento para {_fmt_mes(mes)}.")
@@ -937,7 +917,7 @@ def _tab_analise_individual(con, mes: str):
                     )
                     .properties(height=140)
                 )
-                st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, width="stretch")
             else:
                 st.caption("Sem serviços registrados no mês.")
 
