@@ -16,6 +16,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
 
 _VIGENCIA_INICIO = "2026-01-01"
 _VIGENCIA_AGOSTO = "2026-08-01"
+_VIGENCIA_NOVEMBRO = "2026-11-01"
 
 # RN-12: manicures — parâmetros genéricos históricos (jan/2026, fallback para meses anteriores)
 _PARAMS_MANICURES_HISTORICO = [
@@ -64,6 +65,14 @@ _PARAMS_ASSISTENTES_AGOSTO = [
     ("ouro_meta",    "5000"), ("ouro_premio",   "300"),
 ]
 
+# RN-13: assistentes — novos parâmetros (nov/2026)
+_PARAMS_ASSISTENTES_NOVEMBRO = [
+    ("bronze_meta",    "4500"), ("bronze_premio",   "100"),
+    ("prata_meta",     "5000"), ("prata_premio",    "200"),
+    ("ouro_meta",      "6000"), ("ouro_premio",     "350"),
+    ("diamante_meta",  "7000"), ("diamante_premio", "500"),
+]
+
 # RN-14: recepção/caixa — venda de produtos (ago/2026)
 _PARAMS_RECEPCAO = [
     ("bronze_meta",   "5000"), ("bronze_premio", "100"),
@@ -83,6 +92,8 @@ ASSISTENTES = [
     "Suzan Nayara Garcez Silva",
     "Ana Mayra Coelho De Jesus",
     "Raynara de Cassia Cutrim Dos Santos",
+    "Maria Clara Lemos",
+    "Stephanny Marcelly",
 ]
 
 RECEPCAO_CAIXA = [
@@ -90,9 +101,14 @@ RECEPCAO_CAIXA = [
     "Evelly Caroline Araujo de Sousa",
 ]
 
-# RN-13: Raynara desligada a partir de ago/2026
+# RN-13: Funcionárias desligadas
 DESLIGAMENTOS = {
-    "Raynara de Cassia Cutrim Dos Santos": "2026-08",
+    "Ana Mayra Coelho De Jesus": "2026-04",
+    "Suzan Nayara Garcez Silva": "2026-09",
+    "Maria Clara": "2026-09",
+    "Maria Clara Lemos": "2026-01",
+    "Stephanny Marcelly": "2025-10",
+    "Paula silva Nascimento": "2026-08",
 }
 
 _POLITICA_FUNCAO = {
@@ -147,6 +163,10 @@ def seed_parametros(con) -> None:
     # Assistentes — prêmios atualizados (ago/2026)
     for chave, valor in _PARAMS_ASSISTENTES_AGOSTO:
         _ins("gratificacao_assistentes", chave, valor, _VIGENCIA_AGOSTO)
+
+    # Assistentes — novos parâmetros (nov/2026)
+    for chave, valor in _PARAMS_ASSISTENTES_NOVEMBRO:
+        _ins("gratificacao_assistentes", chave, valor, _VIGENCIA_NOVEMBRO)
 
     # Recepção/caixa (ago/2026)
     for chave, valor in _PARAMS_RECEPCAO:
@@ -211,11 +231,16 @@ def _get_params_fat(politica: str, mes: str, con, profissional: str | None = Non
 
 
 def _nivel_gratificacao(fat: float, params: dict) -> tuple[str | None, float]:
-    niveis = [
-        ("Ouro",   float(params["ouro_meta"]),   float(params["ouro_premio"])),
-        ("Prata",  float(params["prata_meta"]),  float(params["prata_premio"])),
-        ("Bronze", float(params["bronze_meta"]), float(params["bronze_premio"])),
-    ]
+    niveis = []
+    if "diamante_meta" in params and "diamante_premio" in params:
+        niveis.append(("Diamante", float(params["diamante_meta"]), float(params["diamante_premio"])))
+    if "ouro_meta" in params and "ouro_premio" in params:
+        niveis.append(("Ouro", float(params["ouro_meta"]), float(params["ouro_premio"])))
+    if "prata_meta" in params and "prata_premio" in params:
+        niveis.append(("Prata", float(params["prata_meta"]), float(params["prata_premio"])))
+    if "bronze_meta" in params and "bronze_premio" in params:
+        niveis.append(("Bronze", float(params["bronze_meta"]), float(params["bronze_premio"])))
+
     for nome, meta, premio in niveis:
         if fat >= meta:
             return nome, premio

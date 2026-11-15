@@ -1,8 +1,8 @@
 {
   "H1": {
     "desc": "Volume de produtos — 8 arquivos mensais (jan-ago/2026 parcial)",
-    "total_linhas": 867,
-    "total_valor": 28527.0,
+    "total_linhas": 989,
+    "total_valor": 32790.01,
     "por_mes": {
       "2026-01": {
         "linhas": 76,
@@ -33,8 +33,8 @@
         "valor": 6330.0
       },
       "2026-08": {
-        "linhas": 80,
-        "valor": 3694.0
+        "linhas": 202,
+        "valor": 7957.01
       }
     }
   },
@@ -92,6 +92,6 @@
         "Raynara de Cassia Cutrim Dos Santos": {"2026-01":0.0,"2026-02":0.0,"2026-03":0.0,"2026-04":0.0,"2026-05":80.0,"2026-06":340.0}
       }
     },
-    "raynara_desligada_em": "2026-08"
+    "ana_mayra_desligada_em": "2026-04"
   }
 }

@@ -24,10 +24,12 @@ def test_h4_dedup_reimportacao(con, golden):
 
 def test_h4_pendente_nao_entra_apuracao(con, golden):
     """Profissional 'pendente' não deve ter linhas em apuracoes."""
-    pendentes_em_apuracao = con.execute("""
-        SELECT COUNT(*) FROM apuracoes a
-        WHERE json_extract(a.payload_json, '$.pendentes_incluidos') = 1
-    """).fetchone()[0]
+    import json
+    rows = con.execute("SELECT payload_json FROM apuracoes").fetchall()
+    pendentes_em_apuracao = sum(
+        1 for r in rows
+        if isinstance((p := json.loads(r[0])), dict) and p.get("pendentes_incluidos")
+    )
     assert pendentes_em_apuracao == 0, (
         f"{pendentes_em_apuracao} apuração(ões) com pendentes incluídos"
     )

@@ -37,10 +37,10 @@ def test_h5_faturamento_por_mes(con, golden, politica, mes):
     assert not erros, "\n".join(erros)
 
 
-def test_h5_raynara_excluida_apos_desligamento(con, golden):
-    """Raynara não deve aparecer na apuração de ago/2026 em diante (RN-13)."""
+def test_h5_ana_mayra_excluida_apos_desligamento(con, golden):
+    """Ana Mayra não deve aparecer na apuração de abr/2026 em diante (RN-13)."""
     linhas = apurar_faturamento("2026-08", "assistentes", con)
     nomes = [r["nome"] for r in linhas]
-    assert "Raynara de Cassia Cutrim Dos Santos" not in nomes, (
-        "Raynara deveria estar excluída da apuração de 2026-08 (desligada)"
+    assert "Ana Mayra Coelho De Jesus" not in nomes, (
+        "Ana Mayra deveria estar excluída da apuração de 2026-08 (desligada em abr/2026)"
     )

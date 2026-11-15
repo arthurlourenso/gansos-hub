@@ -1,5 +1,11 @@
 """H1 — Volume de produtos (7 arquivos mensais)."""
+import os
+import sys
+
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import src.db as db
 
 
 def test_h1_total_linhas(con, golden):
@@ -17,8 +23,8 @@ def test_h1_total_valor(con, golden):
 
 
 def test_h1_por_mes(con, golden):
-    rows = con.execute("""
-        SELECT strftime('%Y-%m', data_hora) as mes, COUNT(*), ROUND(SUM(valor), 2)
+    rows = con.execute(f"""
+        SELECT {db.mes_expr('data_hora')} as mes, COUNT(*), ROUND(SUM(valor), 2)
         FROM vendas WHERE tipo='Produto'
         GROUP BY mes ORDER BY mes
     """).fetchall()
@@ -42,10 +48,16 @@ def test_h1_zero_valores_nulos(con, golden):
 
 
 def test_h1_zero_datas_invalidas(con, golden):
-    invalidas = con.execute("""
-        SELECT COUNT(*) FROM vendas
-        WHERE tipo='Produto'
-          AND (data_hora IS NULL
-               OR data_hora NOT GLOB '????-??-?? ??:??:??')
-    """).fetchone()[0]
+    if db.dialect() == "postgres":
+        # data_hora é TIMESTAMP: formato inválido é impossível por tipo; só NULL.
+        invalidas = con.execute(
+            "SELECT COUNT(*) FROM vendas WHERE tipo='Produto' AND data_hora IS NULL"
+        ).fetchone()[0]
+    else:
+        invalidas = con.execute("""
+            SELECT COUNT(*) FROM vendas
+            WHERE tipo='Produto'
+              AND (data_hora IS NULL
+                   OR data_hora NOT GLOB '????-??-?? ??:??:??')
+        """).fetchone()[0]
     assert invalidas == 0, f"{invalidas} linha(s) com data inválida em produtos"

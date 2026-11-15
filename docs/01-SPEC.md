@@ -26,7 +26,16 @@ a: importar exports → conferir → publicar.
 - **RN-10 (Gratificação barbeiros):** métrica = ticket médio mensal (serviços; atendimento =
   cliente+dia+profissional). Níveis: Bronze ≥ R$ 120 → R$ 150; Prata ≥ R$ 135 → R$ 300;
   Ouro ≥ R$ 150 → R$ 500. Elegibilidade: ≥ 50 atendimentos/mês. Parâmetros com vigência
-  trimestral — a apuração de um mês usa a regra vigente NAQUELE mês.
+  trimestral — a apuração de um mês usa a regra vigente NAQUELE mês. **Vale até ago/2026.**
+- **RN-10 v2 (Gratificação barbeiros, vigência 01/09/2026):** o bônus só existe se houver
+  crescimento real. (1) *Gate do setor*: faturamento de serviços do setor de barbeiros vs. média
+  dos 3 meses anteriores — Bronze +7%, Prata +12%, Ouro +18%. (2) *TM individual*: ticket médio do
+  barbeiro vs. a média do próprio TM nos 6 meses anteriores (mín. 3 meses de histórico) — Bronze
+  +7%, Prata +12%, Ouro +18% (mesma escala do setor). Barbeiro sem histórico pode herdar o
+  baseline de outro (parâmetro `baseline_como`; ex.: Pedro Ian usa o do William). (3) **Nível efetivo = menor entre o nível do setor e o do TM**;
+  prêmios R$ 150 / R$ 300 / R$ 500. Setor sem nível = ninguém recebe. Atendimentos são PDI
+  (meta = média dos 6 meses + 10%), não condição de bônus. Getúlio (desligado) fica fora do setor.
+  Parâmetros em `gratificacao_barbeiros` com `modelo=setor_tm` (RN-20); meses anteriores seguem a v1.
 - **RN-11 (Comissão produtos):** por referência, a spec sdd-comissionamento v1.0 na íntegra
   (grooming 8% / bar 4%, meta coletiva R$ 5.000 → bônus R$ 150, guardrail 25% da margem).
 - **RN-12 (Gratificação manicures):** métrica = faturamento mensal registrado (serviços).

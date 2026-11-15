@@ -48,3 +48,10 @@ CREATE TABLE IF NOT EXISTS apuracoes (
     publicada_em  TEXT    NOT NULL,
     UNIQUE (mes, politica)
 );
+
+CREATE INDEX IF NOT EXISTS idx_vendas_data_hora ON vendas(data_hora);
+CREATE INDEX IF NOT EXISTS idx_vendas_prof_tipo ON vendas(profissional_id, tipo, data_hora);
+CREATE INDEX IF NOT EXISTS idx_vendas_tipo_data ON vendas(tipo, data_hora);
+CREATE INDEX IF NOT EXISTS idx_vendas_cliente ON vendas(cliente);
+CREATE INDEX IF NOT EXISTS idx_parametros_busca ON parametros(politica, vigencia_inicio, vigencia_fim);
+

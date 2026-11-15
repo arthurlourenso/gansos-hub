@@ -1,16 +1,41 @@
 """
-src/db.py — Camada de conexão: SQLite local ou PostgreSQL (DATABASE_URL).
-Uso: from src.db import conectar, mes_expr, date_expr
+src/db.py — Camada de conexão: SQLite local ou PostgreSQL (Supabase).
+
+Resolução da DATABASE_URL (nesta ordem):
+  1. variável de ambiente DATABASE_URL (scripts, harness, CI).
+  2. st.secrets["DATABASE_URL"] — SÓ quando rodando dentro do app Streamlit.
+Caso contrário, SQLite local. Assim o app online usa Supabase e as ferramentas
+de linha de comando seguem no SQLite local, salvo override explícito por env var.
 """
 import os
 import sqlite3 as _sqlite3
 
-_DATABASE_URL = os.environ.get("DATABASE_URL")
 _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "gansos.db")
+
+_url_cache = None
+_url_resolvido = False
+
+
+def _database_url() -> str | None:
+    global _url_cache, _url_resolvido
+    if _url_resolvido:
+        return _url_cache
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        try:
+            import streamlit as st
+            from streamlit.runtime import exists as _rt_exists
+            if _rt_exists() and "DATABASE_URL" in st.secrets:
+                url = st.secrets["DATABASE_URL"]
+        except Exception:
+            pass
+    _url_cache = url
+    _url_resolvido = True
+    return url
 
 
 def dialect() -> str:
-    return "postgres" if _DATABASE_URL else "sqlite"
+    return "postgres" if _database_url() else "sqlite"
 
 
 def mes_expr(col: str) -> str:
@@ -90,8 +115,16 @@ class Connection:
             from psycopg2.extras import RealDictCursor
             sql = sql.replace("?", "%s")
             cur = self._conn.cursor(cursor_factory=RealDictCursor)
-        else:
-            cur = self._conn.cursor()
+            try:
+                cur.execute(sql, params)
+            except Exception:
+                # No Postgres uma query com erro aborta a transação e envenena
+                # a conexão (em cache) para todas as seguintes. Rollback mantém
+                # a conexão utilizável, como no SQLite.
+                self._conn.rollback()
+                raise
+            return _Cursor(cur)
+        cur = self._conn.cursor()
         cur.execute(sql, params)
         return _Cursor(cur)
 
@@ -110,13 +143,39 @@ class Connection:
         self.close()
 
 
+_decimal_registrado = False
+
+
+def _registrar_decimal_como_float(psycopg2) -> None:
+    """Faz NUMERIC do Postgres voltar como float, igual ao REAL do SQLite.
+
+    Sem isso, SUM(valor) volta Decimal no Postgres e float no SQLite, e a
+    apuração/relatórios divergem por tipo. A camada de abstração normaliza isso.
+    """
+    global _decimal_registrado
+    if _decimal_registrado:
+        return
+    from psycopg2 import extensions
+    dec2float = extensions.new_type(
+        extensions.DECIMAL.values,
+        "DEC2FLOAT",
+        lambda value, curs: float(value) if value is not None else None,
+    )
+    extensions.register_type(dec2float)
+    _decimal_registrado = True
+
+
 def conectar(path: str | None = None) -> Connection:
     """Retorna uma Connection para PostgreSQL (se DATABASE_URL definida) ou SQLite."""
-    if _DATABASE_URL:
+    url = _database_url()
+    if url:
         import psycopg2
-        conn = psycopg2.connect(_DATABASE_URL)
+        _registrar_decimal_como_float(psycopg2)
+        conn = psycopg2.connect(url)
         return Connection(conn, is_pg=True)
     db_path = path or _SQLITE_PATH
     conn = _sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     conn.row_factory = _sqlite3.Row
     return Connection(conn, is_pg=False)
